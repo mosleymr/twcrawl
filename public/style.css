@@ -16,6 +16,9 @@ table { border-collapse: collapse; width: 100%; }
 .grid td { padding: 4px 5px; border-bottom: 1px solid rgba(0, 153, 153, 0.12); color: #18b018; }
 .grid tr:nth-child(even) td { color: #62ff62; background: rgba(0, 20, 22, 0.28); }
 .grid .num, .num { text-align: center; }
+.grid td.quality.good { color: #42ff65; }
+.grid td.quality.warn { color: #ffff66; }
+.grid td.quality.bad { color: #ff5f5f; }
 .sort-button { appearance: none; background: transparent; border: 0; color: #099; cursor: pointer; font: inherit; font-weight: bold; padding: 0; }
 .sort-button:hover { color: #0cc; }
 .sort-button[aria-sort="ascending"]::after { content: " ▲"; color: #777; }

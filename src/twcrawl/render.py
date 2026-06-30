@@ -82,8 +82,8 @@ def render_server(data: dict, server: dict) -> str:
             f"<td>{esc(game.get('bigbang'))}</td>"
             f"<td>{days_cell(game)}</td>"
             f"<td>{esc(game.get('type'))}</td>"
-            f"<td>{esc(game.get('version'))}</td>"
-            f"<td>{esc(game.get('emulation'))}</td>"
+            f"<td class='{quality_class(latency_class(game))}'>{esc(game_latency(game))}</td>"
+            f"<td class='{quality_class(delay_class(game))}'>{esc(game_delay(game))}</td>"
             f"<td>{esc(game.get('time'))}</td>"
             f"<td>{esc(game.get('turns'))}</td>"
             f"<td class='num'>{esc(game.get('sectors'))}</td>"
@@ -105,7 +105,7 @@ def render_server(data: dict, server: dict) -> str:
 </table>
 <p class="note">* = Days Since Start. Live values are generated from TWGS <code>*</code> game stats.</p>
 <table class="grid games">
-  <thead><tr><th>Game</th><th>Name</th><th>BigBang</th><th>Days*</th><th>Type</th><th>Version</th><th>Emulation</th><th>Time</th><th>Turns</th><th>Sectors</th><th>Players</th></tr></thead>
+  <thead><tr><th>Game</th><th>Name</th><th>BigBang</th><th>Days*</th><th>Type</th><th>Latency</th><th>Delay</th><th>Time</th><th>Turns</th><th>Sectors</th><th>Players</th></tr></thead>
   <tbody>{''.join(rows)}</tbody>
 </table>
 <p class="select">Select a game to view game details.</p>
@@ -191,6 +191,44 @@ def status_sort_value(server: dict) -> str:
 def days_cell(game: dict) -> str:
     days = game.get("days_open")
     return "" if days is None else str(days)
+
+
+def game_latency(game: dict) -> str:
+    return str((game.get("stats") or {}).get("Latency") or "")
+
+
+def latency_class(game: dict) -> str:
+    value = game_latency(game)
+    match = re.search(r"\d+", value)
+    if not match:
+        return ""
+    milliseconds = int(match.group(0))
+    if milliseconds <= 150:
+        return "good"
+    if milliseconds <= 250:
+        return "warn"
+    return "bad"
+
+
+def game_delay(game: dict) -> str:
+    value = str((game.get("stats") or {}).get("Ship Delay") or "")
+    match = re.search(r"[A-Za-z]+", value)
+    return match.group(0).lower() if match else ""
+
+
+def delay_class(game: dict) -> str:
+    value = game_delay(game)
+    if not value:
+        return ""
+    if value == "none":
+        return "good"
+    if value == "quarter":
+        return "warn"
+    return "bad"
+
+
+def quality_class(value: str) -> str:
+    return f"quality {value}".strip()
 
 
 def format_timestamp(value: str | None) -> str:
@@ -558,6 +596,9 @@ table { border-collapse: collapse; width: 100%; }
 .grid td { padding: 4px 5px; border-bottom: 1px solid rgba(0, 153, 153, 0.12); color: #18b018; }
 .grid tr:nth-child(even) td { color: #62ff62; background: rgba(0, 20, 22, 0.28); }
 .grid .num, .num { text-align: center; }
+.grid td.quality.good { color: #42ff65; }
+.grid td.quality.warn { color: #ffff66; }
+.grid td.quality.bad { color: #ff5f5f; }
 .sort-button { appearance: none; background: transparent; border: 0; color: #099; cursor: pointer; font: inherit; font-weight: bold; padding: 0; }
 .sort-button:hover { color: #0cc; }
 .sort-button[aria-sort="ascending"]::after { content: " ▲"; color: #777; }
