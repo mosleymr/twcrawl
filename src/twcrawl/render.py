@@ -1,17 +1,33 @@
 from __future__ import annotations
 
 import html
+import shutil
 from datetime import datetime
 from pathlib import Path
 
 
+ROOT = Path(__file__).resolve().parents[2]
+ASSET_DIR = ROOT / "assets"
+
+
 def build_site(data: dict, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    copy_assets(out_dir)
     (out_dir / "style.css").write_text(STYLE, encoding="utf-8")
     (out_dir / "index.html").write_text(render_index(data), encoding="utf-8")
     for server in data.get("servers", []):
         filename = server_filename(server)
         (out_dir / filename).write_text(render_server(data, server), encoding="utf-8")
+
+
+def copy_assets(out_dir: Path) -> None:
+    if not ASSET_DIR.exists():
+        return
+    target = out_dir / "assets"
+    target.mkdir(parents=True, exist_ok=True)
+    for path in ASSET_DIR.iterdir():
+        if path.is_file():
+            shutil.copy2(path, target / path.name)
 
 
 def render_index(data: dict) -> str:
@@ -35,7 +51,7 @@ def render_index(data: dict) -> str:
             "</tr>"
         )
     body = f"""
-<h1>Servers</h1>
+<h1>Gone Rogue Tradewars</h1>
 {summary_band(data)}
 <h2>Game Servers (TWGS v2.x)</h2>
 <table class="grid sortable" id="servers-table">
@@ -226,27 +242,31 @@ SORT_SCRIPT = """
 
 
 STYLE = """
-html, body { margin: 0; min-height: 100%; background: #000; color: #999; font: 13px Verdana, Arial, sans-serif; }
+html, body { margin: 0; min-height: 100%; color: #999; font: 13px Verdana, Arial, sans-serif; }
+body { background: #000 url("assets/stars-galaxy-3840x2160-10307.jpg") center top / cover fixed no-repeat; }
+body::before { content: ""; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.58); pointer-events: none; z-index: -1; }
 a { color: #777; text-decoration: none; }
 a:hover { color: #aaa; }
-.shell { width: 900px; margin: 0 auto; }
+.shell { width: 900px; margin: 0 auto; padding-top: 10px; }
 main { display: block; }
 .content { min-width: 0; }
 h1 { color: #099; font-size: 20px; margin: 10px 0 18px; text-align: center; }
 h2 { color: #099; font-size: 14px; margin: 18px 0 8px; text-align: center; }
-.summary { border: 1px solid #222; background: #050505; padding: 8px; margin-bottom: 14px; display: flex; gap: 18px; justify-content: center; color: #aaa; }
+.summary { border: 1px solid #1f3030; background: rgba(0, 8, 10, 0.82); padding: 8px; margin-bottom: 14px; display: flex; gap: 18px; justify-content: center; color: #aaa; }
 table { border-collapse: collapse; width: 100%; }
-.grid th { color: #099; font-weight: bold; border-bottom: 1px solid #222; padding: 4px 5px; text-align: left; }
-.grid td { padding: 4px 5px; border-bottom: 1px solid #111; color: #090; }
-.grid tr:nth-child(even) td { color: lime; }
-.grid .num, .num { text-align: right; }
+.grid { background: rgba(0, 5, 7, 0.84); border: 1px solid rgba(0, 153, 153, 0.22); }
+.grid th { color: #0aa; font-weight: bold; border-bottom: 1px solid rgba(0, 153, 153, 0.28); padding: 4px 5px; text-align: left; background: rgba(0, 15, 18, 0.9); }
+.grid td { padding: 4px 5px; border-bottom: 1px solid rgba(0, 153, 153, 0.12); color: #18b018; }
+.grid tr:nth-child(even) td { color: #62ff62; background: rgba(0, 20, 22, 0.28); }
+.grid .num, .num { text-align: center; }
 .sort-button { appearance: none; background: transparent; border: 0; color: #099; cursor: pointer; font: inherit; font-weight: bold; padding: 0; }
 .sort-button:hover { color: #0cc; }
 .sort-button[aria-sort="ascending"]::after { content: " ▲"; color: #777; }
 .sort-button[aria-sort="descending"]::after { content: " ▼"; color: #777; }
 .status-dot { width: 22px; text-align: center; }
-.serverlink { font-weight: bold; }
-.detail { margin: 4px auto 12px; width: 650px; }
+.serverlink { color: #a8d9e8; font-weight: normal; }
+.serverlink:hover { color: #d8f3ff; }
+.detail { margin: 4px auto 12px; width: 650px; background: rgba(0, 5, 7, 0.84); border: 1px solid rgba(0, 153, 153, 0.22); }
 .detail td { padding: 3px 7px; color: #999; }
 .detail td:nth-child(odd) { color: #777; text-align: right; white-space: nowrap; }
 .note, .select, .muted { color: #888; }
