@@ -86,11 +86,11 @@ def render_server(data: dict, server: dict) -> str:
             f"<td><a class='game-link' href='{game_href}'>{esc(game.get('letter'))}</a></td>"
             f"<td><a class='game-link' href='{game_href}'>{esc(game_name)}</a></td>"
             f"<td>{esc(game.get('bigbang'))}</td>"
-            f"<td>{days_cell(game)}</td>"
+            f"<td class='{quality_class(days_class(game))}'>{days_cell(game)}</td>"
             f"<td>{esc(game.get('type'))}</td>"
             f"<td class='{quality_class(latency_class(game))}'>{esc(game_latency(game))}</td>"
             f"<td class='{quality_class(delay_class(game))}'>{esc(game_delay(game))}</td>"
-            f"<td>{esc(game.get('time'))}</td>"
+            f"<td class='{quality_class(time_class(game))}'>{esc(game.get('time'))}</td>"
             f"<td>{esc(game.get('turns'))}</td>"
             f"<td class='num'>{esc(game.get('sectors'))}</td>"
             f"<td class='num'>{esc(game.get('players'))}</td>"
@@ -211,6 +211,28 @@ def status_sort_value(server: dict) -> str:
 def days_cell(game: dict) -> str:
     days = game.get("days_open")
     return "" if days is None else str(days)
+
+
+def days_class(game: dict) -> str:
+    days = game.get("days_open")
+    if days is None:
+        return ""
+    try:
+        value = int(days)
+    except (TypeError, ValueError):
+        return ""
+    if value < 60:
+        return "good"
+    if value <= 120:
+        return "warn"
+    return "bad"
+
+
+def time_class(game: dict) -> str:
+    value = str(game.get("time") or "").strip().lower()
+    if not value:
+        return ""
+    return "good" if value == "unlimited" else "bad"
 
 
 def game_latency(game: dict) -> str:
