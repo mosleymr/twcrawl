@@ -6,6 +6,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from .parser import clean_menu_game_name
+
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSET_DIR = ROOT / "assets"
@@ -19,9 +21,13 @@ def build_site(data: dict, out_dir: Path) -> None:
     for server in data.get("servers", []):
         filename = server_filename(server)
         (out_dir / filename).write_text(render_server(data, server), encoding="utf-8")
-        games = server.get("games") or []
+        games = display_games(server)
+        server_dir = out_dir / game_directory(server)
+        if server_dir.exists():
+            for stale in server_dir.glob("game-*.html"):
+                stale.unlink()
         if games:
-            (out_dir / game_directory(server)).mkdir(parents=True, exist_ok=True)
+            server_dir.mkdir(parents=True, exist_ok=True)
             for game in games:
                 (out_dir / game_filename(server, game)).write_text(render_game(data, server, game), encoding="utf-8")
 
@@ -70,15 +76,15 @@ def render_index(data: dict) -> str:
 
 
 def render_server(data: dict, server: dict) -> str:
-    games = server.get("games") or []
+    games = display_games(server)
     rows = []
     for game in games:
         game_href = game_filename(server, game)
-        game_name = esc(game.get("name"))
+        game_name = display_game_name(game)
         rows.append(
             "<tr>"
             f"<td><a class='game-link' href='{game_href}'>{esc(game.get('letter'))}</a></td>"
-            f"<td><a class='game-link' href='{game_href}'>{game_name}</a></td>"
+            f"<td><a class='game-link' href='{game_href}'>{esc(game_name)}</a></td>"
             f"<td>{esc(game.get('bigbang'))}</td>"
             f"<td>{days_cell(game)}</td>"
             f"<td>{esc(game.get('type'))}</td>"
@@ -117,16 +123,17 @@ def render_server(data: dict, server: dict) -> str:
 
 def render_game(data: dict, server: dict, game: dict) -> str:
     raw_stats = game.get("raw_stats") or ""
+    game_name = display_game_name(game)
     body = f"""
 <p class="breadcrumb"><a href="../index.html">Servers</a> / <a href="../{server_filename(server)}">{esc(server.get('name'))}</a></p>
-<h1>{esc(server.get('name'))} - Game {esc(game.get('letter'))}: {esc(game.get('name'))}</h1>
+<h1>{esc(server.get('name'))} - Game {esc(game.get('letter'))}: {esc(game_name)}</h1>
 {render_game_stats_panel(server, game)}
 <details class="raw-stats">
   <summary>Raw TWGS * stats</summary>
   <pre>{esc(raw_stats or 'No raw stats captured for this game.')}</pre>
 </details>
 """
-    return page(f"{server.get('name')} {game.get('letter')} {game.get('name')}", body, data, current=server, asset_prefix="../")
+    return page(f"{server.get('name')} {game.get('letter')} {game_name}", body, data, current=server, asset_prefix="../")
 
 
 def page(title: str, body: str, data: dict, current: dict | None = None, asset_prefix: str = "") -> str:
@@ -169,6 +176,19 @@ def server_filename(server: dict) -> str:
 
 def game_filename(server: dict, game: dict) -> str:
     return f"{game_directory(server)}/game-{str(game.get('letter', 'game')).lower()}.html"
+
+
+def display_games(server: dict) -> list[dict]:
+    return [
+        game
+        for game in server.get("games") or []
+        if game.get("status") == "ok" or game.get("stats") or game.get("raw_stats")
+    ]
+
+
+def display_game_name(game: dict) -> str:
+    raw_name = str(game.get("name") or "")
+    return clean_menu_game_name(raw_name) or raw_name
 
 
 def game_directory(server: dict) -> str:

@@ -6,7 +6,9 @@ from datetime import datetime
 
 
 ANGLE_MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
-DOT_MENU_GAME_RE = re.compile(r"([A-Z])\.\s*([^<\n\r]*?)(?=[A-Z]\.\s*|\s+[A-Z]\.\s*|\n|$)")
+DOT_MENU_GAME_RE = re.compile(r"(?:^|\s)([A-Z])\.\s+([^<\n\r]*?)(?=[A-Z]\.\s+|\s+[A-Z]\.\s+|\n|$)", re.MULTILINE)
+ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+LINE_ART_RE = re.compile(r"[╔╗╚╝╠╣╦╩╬═║▐▌▄▀█▓▒░■□▪▬▔▁▂▃▅▆▇·].*")
 
 
 def parse_server_menu(text: str) -> dict:
@@ -46,9 +48,12 @@ def add_menu_game(games: list[dict], seen: set[str], letter: str, raw_name: str)
 
 
 def clean_menu_game_name(value: str) -> str:
+    value = ANSI_RE.sub("", value)
+    value = LINE_ART_RE.sub("", value)
     value = value.strip()
     value = re.split(r"\s{2,}", value, maxsplit=1)[0]
     value = re.sub(r"\s+\[[^\]]+\]\s*$", "", value)
+    value = value.rstrip(" ·")
     return " ".join(value.split())
 
 
