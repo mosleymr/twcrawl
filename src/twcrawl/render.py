@@ -220,11 +220,27 @@ def delay_class(game: dict) -> str:
     value = game_delay(game)
     if not value:
         return ""
-    if value == "none":
+    if value == "none" or (value == "constant" and constant_delay_milliseconds(game) <= 250):
         return "good"
-    if value == "quarter":
+    if value in {"quarter", "third"}:
         return "warn"
+    if value in {"half", "double", "constant"}:
+        return "bad"
     return "bad"
+
+
+def constant_delay_milliseconds(game: dict) -> int:
+    raw_value = str((game.get("stats") or {}).get("Ship Delay") or "")
+    match = re.search(r"\((\d+)\s*(ms|msec|millisecond|milliseconds|s|sec|secs|second|seconds|min|mins|minute|minutes)\)", raw_value, re.IGNORECASE)
+    if not match:
+        return 251
+    amount = int(match.group(1))
+    unit = match.group(2).lower()
+    if unit.startswith("m") and unit not in {"min", "mins", "minute", "minutes"}:
+        return amount
+    if unit.startswith("s"):
+        return amount * 1000
+    return amount * 60000
 
 
 def quality_class(value: str) -> str:
