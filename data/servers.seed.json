@@ -100,20 +100,6 @@
       "type": "twgs2"
     },
     {
-      "archived_detail_url": "https://web.archive.org/web/20260513011549/http://microblaster.net/ServerDetail.aspx?type=twgs2&serverid=276",
-      "bbs": "None",
-      "game_count": 6,
-      "last_bigbang": "03/01/2026",
-      "name": "DarkMatter",
-      "players": 7,
-      "server_id": "276",
-      "slug": "darkmatter",
-      "status": "seed",
-      "telnet": "twgs.geekm0nkey.com:23",
-      "tradewars_version": "TWGS 2.20",
-      "type": "twgs2"
-    },
-    {
       "archived_detail_url": "https://web.archive.org/web/20260513011549/http://microblaster.net/ServerDetail.aspx?type=twgs2&serverid=231",
       "bbs": "None",
       "game_count": 2,

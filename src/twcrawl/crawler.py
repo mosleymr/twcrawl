@@ -11,6 +11,9 @@ from .parser import parse_game_stats, parse_server_menu
 from .telnet import TelnetError, TelnetSession
 
 
+SERVER_MENU_PROMPT_RE = re.compile(r"[:?]\s")
+
+
 def load_json(path: Path) -> dict:
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
@@ -93,8 +96,7 @@ def crawl_server(
         telnet.wait_for("Please enter your name", timeout=connect_timeout)
         telnet.send_line(bot_name)
         menu_start = len(telnet.text)
-        menu = telnet.wait_for("Selection (? for menu):", timeout=20.0)
-        server_info = parse_server_menu(menu)
+        menu, server_info = wait_for_server_menu(telnet, since=menu_start, timeout=20.0)
         games = server_info.pop("menu_games", [])
 
         crawled_games: list[dict] = []
@@ -120,7 +122,7 @@ def crawl_server(
             exit_start = len(telnet.text)
             telnet.send_line("X")
             try:
-                telnet.wait_for("Selection (? for menu):", timeout=20.0, since=exit_start)
+                wait_for_server_menu(telnet, since=exit_start, timeout=20.0)
             except TelnetError:
                 break
 
@@ -138,12 +140,27 @@ def crawl_server(
     return server_info
 
 
+def wait_for_server_menu(telnet: TelnetSession, *, since: int, timeout: float) -> tuple[str, dict]:
+    deadline = time.monotonic() + timeout
+    last_info: dict = {}
+    while time.monotonic() < deadline:
+        window = telnet.text[since:]
+        last_info = parse_server_menu(window)
+        if last_info.get("menu_games") and SERVER_MENU_PROMPT_RE.search(window):
+            return window, last_info
+        telnet.read_available(0.15)
+    raise TelnetError(
+        f"timed out waiting for server menu prompt from {telnet.host}:{telnet.port}; "
+        f"identified {len(last_info.get('menu_games', []))} game letters"
+    )
+
+
 def recover_to_menu(telnet: TelnetSession) -> None:
     for command in ("X", "Q", ""):
         start = len(telnet.text)
         telnet.send_line(command)
         try:
-            telnet.wait_for("Selection (? for menu):", timeout=8.0, since=start)
+            wait_for_server_menu(telnet, since=start, timeout=8.0)
             return
         except TelnetError:
             continue
@@ -194,4 +211,3 @@ def parse_telnet_address(value: str) -> tuple[str, int]:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "server"
-

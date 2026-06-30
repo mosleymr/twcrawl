@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 
 
-MENU_GAME_RE = re.compile(r"<([A-Z])>\s+([^<\n\r]+?)(?=\s+<[A-Z#!Q]|\n|$)")
+MENU_GAME_RE = re.compile(r"<([A-Z])>\s+([^<\n\r]*?)(?=\s+<[A-Z#!]|\n|$)")
 
 
 def parse_server_menu(text: str) -> dict:
@@ -24,12 +24,21 @@ def parse_server_menu(text: str) -> dict:
     games = []
     for match in MENU_GAME_RE.finditer(text):
         letter = match.group(1).upper()
-        name = " ".join(match.group(2).split())
-        if name.lower() in {"quit", "players online", "view game descriptions"}:
+        if letter == "Q":
+            continue
+        name = clean_menu_game_name(match.group(2))
+        if not name or name.lower() in {"quit", "players online", "view game descriptions", "description menu"}:
             continue
         games.append({"letter": letter, "name": name})
     info["menu_games"] = games
     return info
+
+
+def clean_menu_game_name(value: str) -> str:
+    value = value.strip()
+    value = re.split(r"\s{2,}", value, maxsplit=1)[0]
+    value = re.sub(r"\s+\[[^\]]+\]\s*$", "", value)
+    return " ".join(value.split())
 
 
 def parse_game_stats(text: str, crawl_time: datetime) -> dict:
@@ -127,4 +136,3 @@ def normalize_game_date(value: str | None, local_game_year: int | None, crawl_ti
         return value
     day = min(day, calendar.monthrange(year, month)[1])
     return f"{month:02d}/{day:02d}/{year:04d}"
-

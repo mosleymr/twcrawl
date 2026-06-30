@@ -72,8 +72,12 @@ The runtime JSON is stored at `data/twcrawl.json`:
    - Unsupported options are refused.
 4. Wait for `Please enter your name`.
 5. Send `twcrawl`.
-6. Wait for `Selection (? for menu):`.
-7. Parse `<A> Game Name` entries from the server menu.
+6. Wait until the server menu contains parseable `<A> Game Name` entries and
+   any menu prompt ending in `: ` or `? `. This handles both normal TWGS
+   `Selection (? for menu):` menus and customized menus such as
+   `Select a game :`.
+7. Parse `<A> Game Name` entries from the server menu, ignoring non-game
+   commands such as `<Q>`.
 8. For each game:
    - Send the game letter.
    - Wait for `Enter your choice:`.
@@ -93,4 +97,3 @@ The runtime JSON is stored at `data/twcrawl.json`:
 - `type`: `Open` unless `Closed Game=True`.
 - `bigbang`: TWGS game dates are normalized from the in-game year to the crawl
   timestamp year by matching `Local Game Time`.
-
