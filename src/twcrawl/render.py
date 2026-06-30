@@ -211,13 +211,16 @@ def latency_class(game: dict) -> str:
 
 
 def game_delay(game: dict) -> str:
-    value = str((game.get("stats") or {}).get("Ship Delay") or "")
-    match = re.search(r"[A-Za-z]+", value)
-    return match.group(0).lower() if match else ""
+    raw_value = ship_delay_value(game)
+    if delay_word(game) == "constant":
+        duration = re.search(r"\(([^)]*)\)", raw_value)
+        if duration:
+            return duration.group(1).strip().lower()
+    return delay_word(game)
 
 
 def delay_class(game: dict) -> str:
-    value = game_delay(game)
+    value = delay_word(game)
     if not value:
         return ""
     if value == "none" or (value == "constant" and constant_delay_milliseconds(game) <= 250):
@@ -230,7 +233,7 @@ def delay_class(game: dict) -> str:
 
 
 def constant_delay_milliseconds(game: dict) -> int:
-    raw_value = str((game.get("stats") or {}).get("Ship Delay") or "")
+    raw_value = ship_delay_value(game)
     match = re.search(r"\((\d+)\s*(ms|msec|millisecond|milliseconds|s|sec|secs|second|seconds|min|mins|minute|minutes)\)", raw_value, re.IGNORECASE)
     if not match:
         return 251
@@ -241,6 +244,15 @@ def constant_delay_milliseconds(game: dict) -> int:
     if unit.startswith("s"):
         return amount * 1000
     return amount * 60000
+
+
+def delay_word(game: dict) -> str:
+    match = re.search(r"[A-Za-z]+", ship_delay_value(game))
+    return match.group(0).lower() if match else ""
+
+
+def ship_delay_value(game: dict) -> str:
+    return str((game.get("stats") or {}).get("Ship Delay") or "")
 
 
 def quality_class(value: str) -> str:
