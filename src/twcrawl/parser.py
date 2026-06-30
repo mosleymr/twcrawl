@@ -5,7 +5,8 @@ import re
 from datetime import datetime
 
 
-MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
+ANGLE_MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
+DOT_MENU_GAME_RE = re.compile(r"([A-Z])\.\s*([^<\n\r]*?)(?=[A-Z]\.\s*|\s+[A-Z]\.\s*|\n|$)")
 
 
 def parse_server_menu(text: str) -> dict:
@@ -22,16 +23,26 @@ def parse_server_menu(text: str) -> dict:
         info["nodes"] = int(supports.group(2))
 
     games = []
-    for match in MENU_GAME_RE.finditer(text):
-        letter = match.group(1).upper()
-        if letter == "Q":
-            continue
-        name = clean_menu_game_name(match.group(2))
-        if not name or name.lower() in {"quit", "players online", "view game descriptions", "description menu"}:
-            continue
-        games.append({"letter": letter, "name": name})
+    seen: set[str] = set()
+    for match in ANGLE_MENU_GAME_RE.finditer(text):
+        add_menu_game(games, seen, match.group(1), match.group(2))
+    for match in DOT_MENU_GAME_RE.finditer(text):
+        add_menu_game(games, seen, match.group(1), match.group(2))
     info["menu_games"] = games
     return info
+
+
+def add_menu_game(games: list[dict], seen: set[str], letter: str, raw_name: str) -> None:
+    letter = letter.upper()
+    if letter == "Q":
+        return
+    if letter in seen:
+        return
+    name = clean_menu_game_name(raw_name)
+    if not name or name.lower() in {"quit", "players online", "view game descriptions", "description menu"}:
+        return
+    seen.add(letter)
+    games.append({"letter": letter, "name": name})
 
 
 def clean_menu_game_name(value: str) -> str:

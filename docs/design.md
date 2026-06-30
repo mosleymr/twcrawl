@@ -78,8 +78,10 @@ The runtime JSON is stored at `data/twcrawl.json`:
    `Select a game :`. If a customized ANSI menu displays game letters and then
    waits for input without printing any prompt, treat the menu as ready after
    output goes quiet briefly.
-7. Parse `<A> Game Name` entries from the server menu, ignoring non-game
-   commands such as `<Q>`.
+7. Parse game entries from the server menu, including both `<A> Game Name`
+   and customized `A. Game Name` formats. Adjacent entries such as
+   `A. First GameB. Second Game` are supported. Ignore non-game commands such
+   as `<Q>`.
 8. For each game:
    - Send the game letter.
    - Wait for `Enter your choice:`.
