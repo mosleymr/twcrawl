@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,11 @@ def build_site(data: dict, out_dir: Path) -> None:
     for server in data.get("servers", []):
         filename = server_filename(server)
         (out_dir / filename).write_text(render_server(data, server), encoding="utf-8")
+        games = server.get("games") or []
+        if games:
+            (out_dir / game_directory(server)).mkdir(parents=True, exist_ok=True)
+            for game in games:
+                (out_dir / game_filename(server, game)).write_text(render_game(data, server, game), encoding="utf-8")
 
 
 def copy_assets(out_dir: Path) -> None:
@@ -67,10 +73,12 @@ def render_server(data: dict, server: dict) -> str:
     games = server.get("games") or []
     rows = []
     for game in games:
+        game_href = game_filename(server, game)
+        game_name = esc(game.get("name"))
         rows.append(
             "<tr>"
-            f"<td>{esc(game.get('letter'))}</td>"
-            f"<td>{esc(game.get('name'))}</td>"
+            f"<td><a class='game-link' href='{game_href}'>{esc(game.get('letter'))}</a></td>"
+            f"<td><a class='game-link' href='{game_href}'>{game_name}</a></td>"
             f"<td>{esc(game.get('bigbang'))}</td>"
             f"<td>{days_cell(game)}</td>"
             f"<td>{esc(game.get('type'))}</td>"
@@ -107,13 +115,27 @@ def render_server(data: dict, server: dict) -> str:
     return page(str(server.get("name", "Server")), body, data, current=server)
 
 
-def page(title: str, body: str, data: dict, current: dict | None = None) -> str:
+def render_game(data: dict, server: dict, game: dict) -> str:
+    raw_stats = game.get("raw_stats") or ""
+    body = f"""
+<p class="breadcrumb"><a href="../index.html">Servers</a> / <a href="../{server_filename(server)}">{esc(server.get('name'))}</a></p>
+<h1>{esc(server.get('name'))} - Game {esc(game.get('letter'))}: {esc(game.get('name'))}</h1>
+{render_game_stats_panel(server, game)}
+<details class="raw-stats">
+  <summary>Raw TWGS * stats</summary>
+  <pre>{esc(raw_stats or 'No raw stats captured for this game.')}</pre>
+</details>
+"""
+    return page(f"{server.get('name')} {game.get('letter')} {game.get('name')}", body, data, current=server, asset_prefix="../")
+
+
+def page(title: str, body: str, data: dict, current: dict | None = None, asset_prefix: str = "") -> str:
     return f"""<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>{esc(title)} - twcrawl</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="{asset_prefix}style.css">
 </head>
 <body>
   <div class="shell">
@@ -143,6 +165,15 @@ def summary_band(data: dict) -> str:
 
 def server_filename(server: dict) -> str:
     return f"server-{server.get('server_id', server.get('slug', 'server'))}.html"
+
+
+def game_filename(server: dict, game: dict) -> str:
+    return f"{game_directory(server)}/game-{str(game.get('letter', 'game')).lower()}.html"
+
+
+def game_directory(server: dict) -> str:
+    server_id = server.get("server_id", server.get("slug", "server"))
+    return f"server-{server_id}"
 
 
 def led(server: dict) -> str:
@@ -198,6 +229,274 @@ def esc(value: object) -> str:
 
 def attr(value: object) -> str:
     return html.escape(str(value), quote=True)
+
+
+def render_game_stats_panel(server: dict, game: dict) -> str:
+    stats = game.get("stats") or parse_stats_sections(game.get("raw_stats") or "").get("_flat", {})
+    if not stats:
+        return "<p class='muted'>No live game stats have been captured for this game.</p>"
+
+    sections = [
+        [
+            pair("Registered to", server.get("registered_to") or server.get("name")),
+            pair("Version", long_game_version(stats, game), "Host type", host_type(server)),
+            pair("Age of game", stat(stats, "Game Age", game.get("days_open")), "Days since start", stat(stats, "Game Age", game.get("days_open"))),
+            pair("Delete if idle", stat(stats, "Days Til Deletion")),
+        ],
+        [
+            pair("Players in game", active_of_max(stats, "Active Players", "Users"), "Percent good", percent_value(stat(stats, "Percent Players Good"))),
+            pair("Aliens in game", active_of_max(stats, "Active Aliens", "Aliens"), "Percent good", percent_value(stat(stats, "Percent Aliens Good"))),
+            pair("Ports in game", active_of_max(stats, "Active Ports", "Ports"), "Value of ports", stat(stats, "Port Value")),
+            pair("Planets in game", active_of_max(stats, "Active Planets", "Planets"), "Percent w/ Citadels", percent_value(stat(stats, "Percent Planet Citadels"))),
+            pair("Ships in game", active_of_max(stats, "Active Ships", "Ships"), "Corps in game", stat(stats, "Active Corps")),
+            pair("Figs in game", stat(stats, "Active Figs"), "Mines in game", stat(stats, "Active Mines")),
+        ],
+        [
+            pair("Game type", game.get("type") or game_type(stats), "Game time", game_time(stat(stats, "Local Game Time"))),
+            pair("Time per day", stat(stats, "Time Online", game.get("time")), "Turns per day", strip_turns(stat(stats, "Turn Base", game.get("turns")))),
+            pair("Planetary Trade %", percent_value(stat(stats, "Trade Percent")), "Steal from BUY port", yes_no(stat(stats, "Steal Buy"))),
+            pair("Initial fighters", stat(stats, "Initial Fighters"), "Clear Busts Every", stat(stats, "Clear Bust Days")),
+            pair("Initial credits", comma_int(stat(stats, "Initial Credits")), "Last Bust Clear", last_bust_clear(stats)),
+            pair("Initial holds", stat(stats, "Initial Holds"), "Multiple Photon fire", yes_no(stat(stats, "Multiple Photons"))),
+            pair("Sectors in game", stat(stats, "Sectors", game.get("sectors")), "Display StarDock", yes_no(stat(stats, "Show Stardock"))),
+            pair("Start with planet", yes_no(stat(stats, "New Player Planets")), "Classic Ferrengi", yes_no(stat(stats, "Internal Ferrengi"))),
+            pair("Production Rate", production_rate(stats), "Max Regen per Visit", percent_value(stat(stats, "Max Production Regen"))),
+            pair("Tournament Mode", tournament_mode(stat(stats, "Tournament Mode")), "Invincible Ferrengal", yes_no(stat(stats, "Invincible Ferengal"))),
+        ],
+    ]
+
+    body = "<div class='tw-panel'>"
+    for group in sections:
+        body += render_stat_rows(group)
+        body += "<div class='tw-gap'></div>"
+    body += section_title("Report Settings")
+    body += render_stat_rows(
+        [
+            pair("High Score Mode", stat(stats, "High Score Mode"), "High Score Type", stat(stats, "High Score Type")),
+            pair("Rankings Mode", stat(stats, "Rankings Mode"), "Rankings Type", stat(stats, "Rankings Type")),
+            pair("Entry Log Blackout", stat(stats, "Entry Log Blackout"), "Game Log Blackout", stat(stats, "Game Log Blackout")),
+            pair("Port Report Delay", stat(stats, "Port Report Delay")),
+        ]
+    )
+    body += "<div class='tw-gap'></div>"
+    body += section_title("Delays")
+    body += render_stat_rows(
+        [
+            pair("Ship Attack/Move", stat(stats, "Ship Delay"), "Planet Move", stat(stats, "Planet Delay")),
+            pair("Other Attack", stat(stats, "Other Attacks Delay"), "Rob/Steal", stat(stats, "Crime Delay")),
+            pair("Photon Launch", stat(stats, "Photon Launch Delay"), "Photon Blast", stat(stats, "Photon Wave Delay")),
+            pair("Ship IG", stat(stats, "IC Powerup Delay"), "Planetary IG", stat(stats, "PIG Powerup Delay")),
+            pair("Dock/Depart", stat(stats, "Port Dock/Depart Delay"), "Land/Takeoff", stat(stats, "Planet Landing/Takeoff Delay")),
+            pair("Drop/Take Mines", stat(stats, "Drop/Take Mines Delay"), "Drop/Take Figs", stat(stats, "Take/Drop Fighters Delay")),
+            pair("Planet Transport", stat(stats, "Planet Transporter Delay"), "Ship Transport", stat(stats, "Ship Transporter Delay")),
+            pair("EtherProbe Move", stat(stats, "EProbe Delay"), "GenTorp Launch", stat(stats, "Genesis Launch Delay")),
+        ]
+    )
+    body += "<div class='tw-gap'></div>"
+    body += section_title("IO Emulation")
+    body += render_stat_rows(
+        [
+            pair("Input Bandwidth", stat(stats, "Input Bandwidth")),
+            pair("Output Bandwidth", stat(stats, "Output Bandwidth")),
+            pair("Latency", stat(stats, "Latency")),
+        ]
+    )
+    body += render_additional_stats(stats)
+    body += "</div>"
+    return body
+
+
+def render_stat_rows(rows: list[dict]) -> str:
+    return "".join(
+        "<div class='tw-row'>"
+        f"{render_pair(row['left_label'], row['left_value'])}"
+        f"{render_pair(row.get('right_label'), row.get('right_value'))}"
+        "</div>"
+        for row in rows
+    )
+
+
+def render_pair(label: object, value: object) -> str:
+    if not label:
+        return "<div class='tw-pair'></div>"
+    return (
+        "<div class='tw-pair'>"
+        f"<span class='tw-label'>{esc(label)}</span>"
+        "<span class='tw-colon'>:</span>"
+        f"<span class='tw-value'>{value_markup(value)}</span>"
+        "</div>"
+    )
+
+
+def pair(left_label: object, left_value: object = "", right_label: object | None = None, right_value: object = "") -> dict:
+    return {
+        "left_label": left_label,
+        "left_value": left_value,
+        "right_label": right_label,
+        "right_value": right_value,
+    }
+
+
+def section_title(title: str) -> str:
+    return f"<h2 class='tw-section'>{esc(title)}</h2>"
+
+
+def render_additional_stats(stats: dict[str, str]) -> str:
+    cost_keys = [
+        "Tavern Announcement",
+        "Limpet Removal",
+        "Reregister Ship",
+        "Citadel Transport Unit",
+        "Citadel Transport Upgrade",
+        "Genesis Torpedo",
+        "Armid Mine",
+        "Limpet Mine",
+        "Beacon",
+        "Type I TWarp",
+        "Type II TWarp",
+        "TWarp Upgrade",
+        "Psychic Probe",
+        "Planet Scanner",
+        "Atomic Detonator",
+        "Corbomite",
+        "Ether Probe",
+        "Photon Missile",
+        "Cloaking Device",
+        "Mine Disruptor",
+        "Holographic Scanner",
+        "Density Scanner",
+    ]
+    present = [(key, stats.get(key)) for key in cost_keys if stats.get(key)]
+    if not present:
+        return ""
+    rows = []
+    for index in range(0, len(present), 2):
+        left = present[index]
+        right = present[index + 1] if index + 1 < len(present) else ("", "")
+        rows.append(pair(left[0], left[1], right[0], right[1]))
+    return "<div class='tw-gap'></div>" + section_title("Costs") + render_stat_rows(rows)
+
+
+def parse_stats_sections(raw_stats: str) -> dict[str, dict[str, str]]:
+    sections: dict[str, dict[str, str]] = {"_flat": {}}
+    current = "_flat"
+    for raw_line in raw_stats.splitlines():
+        line = raw_line.strip()
+        if not line or line in {"Game Stats:", "End Stats."}:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+            sections.setdefault(current, {})
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        sections.setdefault(current, {})[key] = value
+        sections["_flat"][key] = value
+    return sections
+
+
+def stat(stats: dict[str, str], key: str, default: object = "") -> object:
+    value = stats.get(key)
+    return default if value in {None, ""} else value
+
+
+def long_game_version(stats: dict[str, str], game: dict) -> str:
+    major = stat(stats, "Major Version")
+    minor = stat(stats, "Minor Version")
+    revision = stat(stats, "Revision")
+    version = f"{major}.{minor}{revision}" if major and minor else str(game.get("version") or "")
+    suffixes = []
+    if yes_no(stat(stats, "MBBS Compatibility")) == "Yes":
+        suffixes.append("MBBS")
+    if yes_no(stat(stats, "Gold Enabled")) == "Yes":
+        suffixes.append("Gold")
+    return " ".join([version, *suffixes]).strip()
+
+
+def host_type(server: dict) -> str:
+    server_type = str(server.get("type") or "").lower()
+    if server_type == "twgs2":
+        return "TWGS v2"
+    return str(server.get("tradewars_version") or server.get("type") or "")
+
+
+def active_of_max(stats: dict[str, str], active_key: str, max_key: str) -> str:
+    active = stat(stats, active_key)
+    max_value = stat(stats, max_key)
+    if max_value in {None, ""}:
+        return str(active)
+    return f"{active} of max {max_value}"
+
+
+def percent_value(value: object) -> str:
+    text = str(value or "")
+    if not text or text.upper() == "N/A" or text.endswith("%"):
+        return text
+    return f"{text}%"
+
+
+def yes_no(value: object) -> str:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if lowered == "true":
+        return "Yes"
+    if lowered == "false":
+        return "No"
+    return text
+
+
+def strip_turns(value: object) -> str:
+    return str(value or "").replace(" Turns", "")
+
+
+def comma_int(value: object) -> str:
+    text = str(value or "").replace(",", "")
+    if not text.isdigit():
+        return str(value or "")
+    return f"{int(text):,}"
+
+
+def production_rate(stats: dict[str, str]) -> str:
+    value = percent_value(stat(stats, "Production Rate"))
+    return f"{value} / Day" if value else ""
+
+
+def tournament_mode(value: object) -> str:
+    text = str(value or "")
+    return "Off" if text == "0" else text
+
+
+def game_type(stats: dict[str, str]) -> str:
+    return "Closed" if yes_no(stat(stats, "Closed Game")) == "Yes" else "Open"
+
+
+def game_time(value: object) -> str:
+    text = str(value or "")
+    parts = text.split(" ", 1)
+    return parts[1] if len(parts) == 2 else text
+
+
+def last_bust_clear(stats: dict[str, str]) -> str:
+    clear_day = str(stat(stats, "Last Bust Clear Day") or "")
+    local_time = str(stat(stats, "Local Game Time") or "")
+    if clear_day and local_time.startswith(clear_day):
+        return "Today"
+    return clear_day
+
+
+def value_markup(value: object) -> str:
+    text = esc(value)
+    text = rewrap_parenthetical(text)
+    if text == "Today":
+        return "<span class='tw-hot'>Today</span>"
+    return text
+
+
+def rewrap_parenthetical(text: str) -> str:
+    return re.sub(r"(\([^)]*\))", r"<span class='tw-hot'>\1</span>", text)
 
 
 SORT_SCRIPT = """
@@ -266,9 +565,24 @@ table { border-collapse: collapse; width: 100%; }
 .status-dot { width: 22px; text-align: center; }
 .serverlink { color: #a8d9e8; font-weight: normal; }
 .serverlink:hover { color: #d8f3ff; }
+.game-link { color: #9ee7f1; font-weight: normal; }
+.game-link:hover { color: #d8f9ff; }
 .detail { margin: 4px auto 12px; width: 650px; background: rgba(0, 5, 7, 0.84); border: 1px solid rgba(0, 153, 153, 0.22); }
 .detail td { padding: 3px 7px; color: #999; }
 .detail td:nth-child(odd) { color: #777; text-align: right; white-space: nowrap; }
+.breadcrumb { color: #777; margin: 2px 0 10px; }
+.breadcrumb a { color: #0aa; }
+.tw-panel { margin: 0 auto 14px; padding: 12px 14px; background: rgba(0, 0, 0, 0.86); border-left: 4px solid rgba(0, 153, 153, 0.62); border-right: 4px solid rgba(0, 153, 153, 0.62); box-shadow: inset 0 0 0 1px rgba(0, 153, 153, 0.24); color: #0f0; font: 16px "Courier New", Consolas, monospace; line-height: 1.22; overflow-x: auto; }
+.tw-row { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); gap: 36px; min-width: 760px; }
+.tw-pair { display: grid; grid-template-columns: 18ch 1ch 1fr; column-gap: 1ch; min-height: 1.22em; }
+.tw-label, .tw-colon { color: #00c020; }
+.tw-value { color: #00f5f5; white-space: pre; }
+.tw-hot { color: #ffff00; }
+.tw-section { color: #d000d0; font: inherit; margin: 18px 0 10px; text-align: left; }
+.tw-gap { height: 16px; }
+.raw-stats { margin: 12px 0; padding: 8px 10px; background: rgba(0, 5, 7, 0.82); border: 1px solid rgba(0, 153, 153, 0.22); }
+.raw-stats summary { color: #0aa; cursor: pointer; }
+.raw-stats pre { max-height: 520px; overflow: auto; color: #aaa; font: 12px "Courier New", Consolas, monospace; white-space: pre-wrap; }
 .note, .select, .muted { color: #888; }
 .error { color: #c66; }
 .led { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; border: 1px solid #111; }
@@ -279,4 +593,8 @@ table { border-collapse: collapse; width: 100%; }
 .led.blue { background: #4ba3d9; }
 code { color: #aaa; }
 footer { text-align: center; color: #666; padding: 24px 0; font-size: 11px; }
+@media (max-width: 940px) {
+  .shell { width: auto; margin: 0 10px; }
+  .tw-panel { font-size: 14px; }
+}
 """

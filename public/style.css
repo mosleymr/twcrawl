@@ -23,9 +23,24 @@ table { border-collapse: collapse; width: 100%; }
 .status-dot { width: 22px; text-align: center; }
 .serverlink { color: #a8d9e8; font-weight: normal; }
 .serverlink:hover { color: #d8f3ff; }
+.game-link { color: #9ee7f1; font-weight: normal; }
+.game-link:hover { color: #d8f9ff; }
 .detail { margin: 4px auto 12px; width: 650px; background: rgba(0, 5, 7, 0.84); border: 1px solid rgba(0, 153, 153, 0.22); }
 .detail td { padding: 3px 7px; color: #999; }
 .detail td:nth-child(odd) { color: #777; text-align: right; white-space: nowrap; }
+.breadcrumb { color: #777; margin: 2px 0 10px; }
+.breadcrumb a { color: #0aa; }
+.tw-panel { margin: 0 auto 14px; padding: 12px 14px; background: rgba(0, 0, 0, 0.86); border-left: 4px solid rgba(0, 153, 153, 0.62); border-right: 4px solid rgba(0, 153, 153, 0.62); box-shadow: inset 0 0 0 1px rgba(0, 153, 153, 0.24); color: #0f0; font: 16px "Courier New", Consolas, monospace; line-height: 1.22; overflow-x: auto; }
+.tw-row { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); gap: 36px; min-width: 760px; }
+.tw-pair { display: grid; grid-template-columns: 18ch 1ch 1fr; column-gap: 1ch; min-height: 1.22em; }
+.tw-label, .tw-colon { color: #00c020; }
+.tw-value { color: #00f5f5; white-space: pre; }
+.tw-hot { color: #ffff00; }
+.tw-section { color: #d000d0; font: inherit; margin: 18px 0 10px; text-align: left; }
+.tw-gap { height: 16px; }
+.raw-stats { margin: 12px 0; padding: 8px 10px; background: rgba(0, 5, 7, 0.82); border: 1px solid rgba(0, 153, 153, 0.22); }
+.raw-stats summary { color: #0aa; cursor: pointer; }
+.raw-stats pre { max-height: 520px; overflow: auto; color: #aaa; font: 12px "Courier New", Consolas, monospace; white-space: pre-wrap; }
 .note, .select, .muted { color: #888; }
 .error { color: #c66; }
 .led { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; border: 1px solid #111; }
@@ -36,3 +51,7 @@ table { border-collapse: collapse; width: 100%; }
 .led.blue { background: #4ba3d9; }
 code { color: #aaa; }
 footer { text-align: center; color: #666; padding: 24px 0; font-size: 11px; }
+@media (max-width: 940px) {
+  .shell { width: auto; margin: 0 10px; }
+  .tw-panel { font-size: 14px; }
+}
