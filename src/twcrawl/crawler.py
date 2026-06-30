@@ -12,6 +12,7 @@ from .telnet import TelnetError, TelnetSession
 
 
 SERVER_MENU_PROMPT_RE = re.compile(r"[:?]\s")
+SERVER_MENU_QUIET_SECONDS = 1.5
 
 
 def load_json(path: Path) -> dict:
@@ -142,12 +143,21 @@ def crawl_server(
 
 def wait_for_server_menu(telnet: TelnetSession, *, since: int, timeout: float) -> tuple[str, dict]:
     deadline = time.monotonic() + timeout
+    last_change = time.monotonic()
+    last_length = len(telnet.text)
     last_info: dict = {}
     while time.monotonic() < deadline:
         window = telnet.text[since:]
+        current_length = len(telnet.text)
+        if current_length != last_length:
+            last_length = current_length
+            last_change = time.monotonic()
         last_info = parse_server_menu(window)
-        if last_info.get("menu_games") and SERVER_MENU_PROMPT_RE.search(window):
-            return window, last_info
+        if last_info.get("menu_games"):
+            if SERVER_MENU_PROMPT_RE.search(window):
+                return window, last_info
+            if time.monotonic() - last_change >= SERVER_MENU_QUIET_SECONDS:
+                return window, last_info
         telnet.read_available(0.15)
     raise TelnetError(
         f"timed out waiting for server menu prompt from {telnet.host}:{telnet.port}; "

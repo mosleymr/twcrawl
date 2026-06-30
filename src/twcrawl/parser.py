@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 
 
-MENU_GAME_RE = re.compile(r"<([A-Z])>\s+([^<\n\r]*?)(?=\s+<[A-Z#!]|\n|$)")
+MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
 
 
 def parse_server_menu(text: str) -> dict:

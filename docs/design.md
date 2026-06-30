@@ -75,7 +75,9 @@ The runtime JSON is stored at `data/twcrawl.json`:
 6. Wait until the server menu contains parseable `<A> Game Name` entries and
    any menu prompt ending in `: ` or `? `. This handles both normal TWGS
    `Selection (? for menu):` menus and customized menus such as
-   `Select a game :`.
+   `Select a game :`. If a customized ANSI menu displays game letters and then
+   waits for input without printing any prompt, treat the menu as ready after
+   output goes quiet briefly.
 7. Parse `<A> Game Name` entries from the server menu, ignoring non-game
    commands such as `<Q>`.
 8. For each game:
