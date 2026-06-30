@@ -31,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     crawl.add_argument("--only")
     crawl.add_argument("--limit", type=int)
     crawl.add_argument("--all", action="store_true")
+    crawl.add_argument("--missing", action="store_true", help="crawl only servers without current usable data")
     crawl.add_argument("--bot-name", default="twcrawl")
     crawl.add_argument("--connect-timeout", type=float, default=12.0)
     crawl.add_argument("--game-timeout", type=float, default=35.0)
@@ -55,12 +56,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {len(data['servers'])} servers to {args.out}")
         return 0
     if args.command == "crawl":
-        if not args.all and not args.only and args.limit is None:
-            raise SystemExit("use --all, --only, or --limit so a crawl is intentional")
+        if not args.all and not args.only and not args.missing and args.limit is None:
+            raise SystemExit("use --all, --only, --missing, or --limit so a crawl is intentional")
         data = load_or_seed(args.data, args.seeds)
         data = crawl_servers(
             data,
             only=args.only,
+            missing=args.missing,
             limit=args.limit,
             bot_name=args.bot_name,
             connect_timeout=args.connect_timeout,

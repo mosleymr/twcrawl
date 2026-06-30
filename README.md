@@ -63,6 +63,7 @@ Open `http://127.0.0.1:8008/`.
 ```bash
 twcrawl init-seeds
 twcrawl crawl --all --build
+twcrawl crawl --missing --build
 twcrawl crawl --only "Gone Rogue" --build
 twcrawl build
 twcrawl serve --port 8008
@@ -73,11 +74,17 @@ The same commands can also be run as a Python module on any platform:
 ```bash
 python -m twcrawl init-seeds
 python -m twcrawl crawl --all --build
+python -m twcrawl crawl --missing --build
 python -m twcrawl serve --port 8008
 ```
 
 By default the crawler stores state in `data/twcrawl.json` and generates pages
 under `public/`.
+
+Use `twcrawl crawl --missing --build` to retry only servers without current
+usable data. A server is considered missing current data when its last crawl did
+not finish online, it has never been crawled, it has no crawled game rows, or
+any game row has a non-`ok` status.
 
 `data/servers.seed.json` is local generated configuration and is intentionally
 not tracked by git. Run `twcrawl init-seeds` once to create it, then edit it for

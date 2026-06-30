@@ -38,12 +38,15 @@ def crawl_servers(
     data: dict,
     *,
     only: str | None = None,
+    missing: bool = False,
     limit: int | None = None,
     bot_name: str = "twcrawl",
     connect_timeout: float = 12.0,
     game_timeout: float = 35.0,
 ) -> dict:
-    selected = select_servers(data.get("servers", []), only=only, limit=limit)
+    selected = select_servers(data.get("servers", []), only=only, missing=missing, limit=limit)
+    if not selected:
+        print("no servers selected for crawl")
     for server in selected:
         print(f"crawl {server.get('name')} {server.get('telnet')}")
         try:
@@ -66,7 +69,7 @@ def crawl_servers(
     return data
 
 
-def select_servers(servers: list[dict], *, only: str | None, limit: int | None) -> list[dict]:
+def select_servers(servers: list[dict], *, only: str | None, missing: bool, limit: int | None) -> list[dict]:
     result = servers
     if only:
         needle = only.lower()
@@ -79,9 +82,22 @@ def select_servers(servers: list[dict], *, only: str | None, limit: int | None) 
         ]
         if not result:
             raise ValueError(f"no server matched {only!r}")
+    if missing:
+        result = [server for server in result if needs_current_data(server)]
     if limit is not None:
         result = result[:limit]
     return result
+
+
+def needs_current_data(server: dict) -> bool:
+    games = server.get("games") or []
+    if server.get("status") != "online":
+        return True
+    if not server.get("last_crawled_at"):
+        return True
+    if not games:
+        return True
+    return any(game.get("status") != "ok" for game in games)
 
 
 def crawl_server(
