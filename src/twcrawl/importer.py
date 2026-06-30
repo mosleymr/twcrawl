@@ -54,7 +54,9 @@ def import_microblaster(url: str = DEFAULT_ARCHIVE_URL) -> dict:
     }
 
 
-def write_seed(path: Path, url: str = DEFAULT_ARCHIVE_URL) -> dict:
+def write_seed(path: Path, url: str = DEFAULT_ARCHIVE_URL, *, overwrite: bool = False) -> dict:
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"{path} already exists; pass --force to overwrite it")
     data = import_microblaster(url)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -71,4 +73,3 @@ def as_int(value: str) -> int:
         return int(value)
     except ValueError:
         return 0
-

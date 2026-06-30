@@ -79,6 +79,15 @@ python -m twcrawl serve --port 8008
 By default the crawler stores state in `data/twcrawl.json` and generates pages
 under `public/`.
 
+`data/servers.seed.json` is local generated configuration and is intentionally
+not tracked by git. Run `twcrawl init-seeds` once to create it, then edit it for
+your server list. Future git pulls will not overwrite it. To intentionally
+regenerate it from the archived MicroBlaster list, run:
+
+```bash
+twcrawl init-seeds --force
+```
+
 ## Notes
 
 - The crawler and web server are cross-platform Python code. They use only the

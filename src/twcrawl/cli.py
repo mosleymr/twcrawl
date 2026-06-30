@@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     init = sub.add_parser("init-seeds", help="import the archived MicroBlaster TWGS2 server list")
     init.add_argument("--url", default=DEFAULT_ARCHIVE_URL)
     init.add_argument("--out", type=Path, default=DEFAULT_SEED)
+    init.add_argument("--force", action="store_true", help="overwrite an existing seed file")
 
     crawl = sub.add_parser("crawl", help="crawl TWGS servers and update JSON data")
     crawl.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
@@ -47,7 +48,10 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "init-seeds":
-        data = write_seed(args.out, args.url)
+        try:
+            data = write_seed(args.out, args.url, overwrite=args.force)
+        except FileExistsError as exc:
+            raise SystemExit(str(exc)) from exc
         print(f"wrote {len(data['servers'])} servers to {args.out}")
         return 0
     if args.command == "crawl":

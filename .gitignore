@@ -3,6 +3,6 @@ __pycache__/
 .venv/
 .DS_Store
 data/twcrawl.json
+data/servers.seed.json
 data/logs/
 public/
-
