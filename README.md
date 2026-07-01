@@ -81,6 +81,49 @@ python -m twcrawl serve --port 8008
 By default the crawler stores state in `data/twcrawl.json` and generates pages
 under `public/`.
 
+## REST/API output
+
+`twcrawl build` also writes static JSON API files under `public/api/`, so the
+same Apache site that serves the HTML pages can serve crawler data over HTTPS
+without running a separate Python process.
+
+Useful Apache-served JSON endpoints:
+
+```text
+/api/index.json
+/api/health.json
+/api/data.json
+/api/servers.json
+/api/servers/{server_id}.json
+/api/servers/{server_id}/games.json
+/api/servers/{server_id}/games/{letter}.json
+/api/games.json
+/api/configurations.json
+```
+
+`/api/data.json` contains the full crawler database. `/api/games.json` is a
+flattened game list with server identity fields for clients such as MTC.
+`/api/configurations.json` exposes each game's parsed `*` configuration values
+and raw stats block.
+
+For local development, `twcrawl serve` also provides live extensionless REST
+routes that reload `data/twcrawl.json` on each request:
+
+```text
+/api
+/api/health
+/api/data
+/api/servers
+/api/servers/{server_id_or_slug}
+/api/servers/{server_id_or_slug}/games
+/api/servers/{server_id_or_slug}/games/{letter}
+/api/games
+/api/configurations
+```
+
+List endpoints accept `full=1`; `/api/games` and `/api/configurations` also
+accept `server=` and `status=` filters.
+
 Use `twcrawl crawl --missing --build` to retry only servers without current
 usable data. A server is considered missing current data when its last crawl did
 not finish online, it has never been crawled, it has no crawled game rows, or

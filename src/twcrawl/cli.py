@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import http.server
+import json
 import socketserver
 from pathlib import Path
+from urllib.parse import urlparse
 
+from .api import api_response
 from .crawler import crawl_servers, load_or_seed, save_json
 from .importer import DEFAULT_ARCHIVE_URL, write_seed
 from .render import build_site
@@ -44,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--out", type=Path, default=DEFAULT_PUBLIC)
 
     serve_parser = sub.add_parser("serve", help="serve generated static pages")
+    serve_parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    serve_parser.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
     serve_parser.add_argument("--out", type=Path, default=DEFAULT_PUBLIC)
     serve_parser.add_argument("--port", type=int, default=8008)
 
@@ -80,17 +85,54 @@ def main(argv: list[str] | None = None) -> int:
         print(f"built {args.out}")
         return 0
     if args.command == "serve":
-        return serve_site(args.out, args.port)
+        return serve_site(args.out, args.port, args.data, args.seeds)
     return 1
 
 
-def serve_site(out: Path, port: int) -> int:
-    handler = http.server.SimpleHTTPRequestHandler
-    class ReusableTCPServer(socketserver.TCPServer):
-        allow_reuse_address = True
+def serve_site(out: Path, port: int, data_path: Path, seed_path: Path) -> int:
+    class TwcrawlHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, directory=str(out), **kwargs)
 
-    with ReusableTCPServer(("127.0.0.1", port), lambda *a, **kw: handler(*a, directory=str(out), **kw)) as httpd:
+        def end_headers(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            super().end_headers()
+
+        def do_OPTIONS(self) -> None:
+            self.send_response(204)
+            self.end_headers()
+
+        def do_GET(self) -> None:
+            parsed = urlparse(self.path)
+            if (parsed.path == "/api" or parsed.path.startswith("/api/")) and not parsed.path.endswith(".json"):
+                self.serve_api(parsed.path, parsed.query)
+                return
+            super().do_GET()
+
+        def serve_api(self, path: str, query: str) -> None:
+            try:
+                data = load_or_seed(data_path, seed_path)
+                status, payload = api_response(data, path, query)
+            except Exception as exc:
+                status = 500
+                payload = {"error": str(exc)}
+            body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    with ReusableTCPServer(("127.0.0.1", port), TwcrawlHandler) as httpd:
         print(f"serving http://127.0.0.1:{port}/ from {out}")
+        print(f"api http://127.0.0.1:{port}/api using {data_path}")
         httpd.serve_forever()
     return 0
 

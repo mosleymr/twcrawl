@@ -6,6 +6,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from .api import write_static_api
 from .parser import clean_menu_game_name
 
 
@@ -30,6 +31,7 @@ def build_site(data: dict, out_dir: Path) -> None:
             server_dir.mkdir(parents=True, exist_ok=True)
             for game in games:
                 (out_dir / game_filename(server, game)).write_text(render_game(data, server, game), encoding="utf-8")
+    write_static_api(data, out_dir)
 
 
 def copy_assets(out_dir: Path) -> None:
