@@ -6,7 +6,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from .api import write_static_api
+from .api import relevant_game, write_static_api
 from .parser import clean_menu_game_name
 
 
@@ -130,9 +130,14 @@ def render_game(data: dict, server: dict, game: dict) -> str:
 <p class="breadcrumb"><a href="../index.html">Servers</a> / <a href="../{server_filename(server)}">{esc(server.get('name'))}</a></p>
 <h1>{esc(server.get('name'))} - Game {esc(game.get('letter'))}: {esc(game_name)}</h1>
 {render_game_stats_panel(server, game)}
+{render_high_scores_panel(game)}
 <details class="raw-stats">
   <summary>Raw TWGS * stats</summary>
   <pre>{esc(raw_stats or 'No raw stats captured for this game.')}</pre>
+</details>
+<details class="raw-stats">
+  <summary>Raw high scores</summary>
+  <pre>{esc(game.get('raw_high_scores') or 'No raw high scores captured for this game.')}</pre>
 </details>
 """
     return page(f"{server.get('name')} {game.get('letter')} {game_name}", body, data, current=server, asset_prefix="../")
@@ -160,7 +165,7 @@ def page(title: str, body: str, data: dict, current: dict | None = None, asset_p
 
 def summary_band(data: dict) -> str:
     servers = data.get("servers", [])
-    total_games = sum(int(server.get("game_count") or 0) for server in servers)
+    total_games = sum(len(display_games(server)) for server in servers)
     total_players = sum(int(server.get("players") or 0) for server in servers)
     return (
         "<div class='summary'>"
@@ -184,7 +189,7 @@ def display_games(server: dict) -> list[dict]:
     return [
         game
         for game in server.get("games") or []
-        if game.get("status") == "ok" or game.get("stats") or game.get("raw_stats")
+        if relevant_game(game)
     ]
 
 
@@ -414,6 +419,30 @@ def render_game_stats_panel(server: dict, game: dict) -> str:
     body += render_additional_stats(stats)
     body += "</div>"
     return body
+
+
+def render_high_scores_panel(game: dict) -> str:
+    rows = []
+    for player in game.get("high_scores") or []:
+        rows.append(
+            "<tr>"
+            f"<td class='num'>{esc(player.get('position'))}</td>"
+            f"<td class='num'>{esc(player.get('rank'))}</td>"
+            f"<td class='num'>{esc(player.get('alignment'))}</td>"
+            f"<td class='num'>{esc(player.get('corp'))}</td>"
+            f"<td>{esc(player.get('name'))}</td>"
+            f"<td>{esc(player.get('ship_type'))}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append("<tr><td colspan='6' class='muted'>No active player high scores captured for this game.</td></tr>")
+    return (
+        "<h2>Active Players</h2>"
+        "<table class='grid player-rankings'>"
+        "<thead><tr><th>#</th><th>Rank</th><th>Alignment</th><th>Corp</th><th>Trader Name</th><th>Ship Type</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+    )
 
 
 def render_stat_rows(rows: list[dict]) -> str:

@@ -7,8 +7,10 @@ from datetime import datetime
 
 ANGLE_MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
 DOT_MENU_GAME_RE = re.compile(r"(?:^|\s)([A-Z])\.\s+([^<\n\r]*?)(?=[A-Z]\.\s+|\s+[A-Z]\.\s+|\n|$)", re.MULTILINE)
+DESCRIPTION_TITLE_RE = re.compile(r"^[ \t]*([A-Z])[ \t]{2,}(.+?)[ \t]*$", re.MULTILINE)
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 LINE_ART_RE = re.compile(r"[╔╗╚╝╠╣╦╩╬═║▐▌▄▀█▓▒░■□▪▬▔▁▂▃▅▆▇·].*")
+DESCRIPTION_ART_RE = re.compile(r"^[\\/_|\- ._=`~^]+$")
 
 
 def parse_server_menu(text: str) -> dict:
@@ -57,6 +59,69 @@ def clean_menu_game_name(value: str) -> str:
     return " ".join(value.split())
 
 
+def parse_game_description_summary(text: str) -> dict[str, str]:
+    info = parse_server_menu(text)
+    return {
+        game["letter"]: game["name"]
+        for game in info.get("menu_games", [])
+        if is_usable_description_name(game.get("name", ""))
+    }
+
+
+def parse_game_description_title(text: str, letter: str) -> str:
+    letter = letter.upper()
+    head = description_detail_head(text)
+    if re.search(r"\bNo description\b", head, re.IGNORECASE):
+        return ""
+    for match in DESCRIPTION_TITLE_RE.finditer(head):
+        if match.group(1).upper() == letter:
+            title = clean_menu_game_name(match.group(2))
+            if is_usable_description_name(title):
+                return title
+    for match in ANGLE_MENU_GAME_RE.finditer(head):
+        if match.group(1).upper() == letter:
+            title = clean_menu_game_name(match.group(2))
+            if is_usable_description_name(title):
+                return title
+    return ""
+
+
+def description_detail_head(text: str) -> str:
+    end = len(text)
+    for marker in (
+        "Show Game Descriptions",
+        "[ANY KEY]",
+        "[Any key",
+        "Describe which game",
+        "Select game",
+    ):
+        position = text.find(marker)
+        if position >= 0:
+            end = min(end, position)
+    return text[:end]
+
+
+def is_usable_description_name(value: str) -> bool:
+    value = value.strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if lowered in {"no description", "no description...", "________"}:
+        return False
+    if lowered.startswith(
+        (
+            "show game descriptions",
+            "select game",
+            "describe which game",
+            "visit our website",
+        )
+    ):
+        return False
+    if DESCRIPTION_ART_RE.fullmatch(value):
+        return False
+    return any(char.isalnum() for char in value)
+
+
 def parse_game_stats(text: str, crawl_time: datetime) -> dict:
     block = extract_stats_block(text)
     values = parse_key_values(block)
@@ -73,6 +138,77 @@ def parse_game_stats(text: str, crawl_time: datetime) -> dict:
     result["sectors"] = int_value(values.get("Sectors"))
     result["players"] = int_value(values.get("Active Players"))
     return result
+
+
+def parse_high_scores(text: str) -> dict:
+    block = extract_high_scores_block(text)
+    return {"raw_high_scores": block, "high_scores": parse_high_score_rows(block)}
+
+
+def extract_high_scores_block(text: str) -> str:
+    rankings_start = text.find("Trade Wars 2002 Trader Rankings")
+    ranking_start = text.rfind("Ranking Traders", 0, rankings_start if rankings_start >= 0 else len(text))
+    if rankings_start == -1:
+        return text.strip()
+    start = ranking_start if ranking_start >= 0 else rankings_start
+    end_candidates = [
+        position
+        for position in (
+            text.find("[Pause]", rankings_start),
+            text.find("==-- Trade Wars 2002 --==", rankings_start),
+            text.find("Enter your choice:", rankings_start),
+        )
+        if position >= 0
+    ]
+    end = min(end_candidates) if end_candidates else len(text)
+    return text[start:end].strip()
+
+
+def parse_high_score_rows(text: str) -> list[dict]:
+    rows: list[dict] = []
+    in_rows = False
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if re.match(r"\s*---\s+-{5,}\s+--\s+-{5,}\s+-{5,}", line):
+            in_rows = True
+            continue
+        if not in_rows:
+            continue
+        if not line.strip():
+            if rows:
+                break
+            continue
+        if line.lstrip().startswith("["):
+            break
+        parsed = parse_high_score_row(line)
+        if parsed:
+            rows.append(parsed)
+    return rows
+
+
+def parse_high_score_row(line: str) -> dict | None:
+    if not re.match(r"\s*\d+\s", line):
+        return None
+    padded = line.ljust(78)
+    position = int_value(padded[0:4])
+    values = re.findall(r"-?[\d,]+", padded[4:25])
+    rank = values[0] if values else ""
+    alignment = values[1] if len(values) > 1 else ""
+    corp = padded[26:29].strip()
+    name = padded[29:60].strip()
+    ship_type = padded[60:].strip()
+    if position is None or not name:
+        return None
+    return {
+        "position": position,
+        "rank": rank,
+        "rank_value": int_value(rank),
+        "alignment": alignment,
+        "alignment_value": int_value(alignment),
+        "corp": corp,
+        "name": name,
+        "ship_type": ship_type,
+    }
 
 
 def extract_stats_block(text: str) -> str:

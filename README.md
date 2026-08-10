@@ -7,7 +7,7 @@ defunct MicroBlaster server-list workflow:
 2. Open a telnet connection to each server.
 3. Login with the crawler name, enumerate the game letters from the TWGS menu,
    enter each game, press `*` at `Enter your choice:`, capture `Game Stats`,
-   exit, and continue.
+   press `H` to capture the active-player high score table, exit, and continue.
 4. Store the crawl result in JSON.
 5. Generate static MicroBlaster-style HTML pages.
 
@@ -67,6 +67,7 @@ twcrawl crawl --missing --build
 twcrawl crawl --only "Gone Rogue" --build
 twcrawl build
 twcrawl serve --port 8008
+twcrawl online Freejack
 ```
 
 The same commands can also be run as a Python module on any platform:
@@ -76,6 +77,7 @@ python -m twcrawl init-seeds
 python -m twcrawl crawl --all --build
 python -m twcrawl crawl --missing --build
 python -m twcrawl serve --port 8008
+python -m twcrawl online Freejack --json
 ```
 
 By default the crawler stores state in `data/twcrawl.json` and generates pages
@@ -99,12 +101,22 @@ Useful Apache-served JSON endpoints:
 /api/servers/{server_id}/games/{letter}.json
 /api/games.json
 /api/configurations.json
+/api/players.json
+/api/players/{player_slug}.json
+/api/players/{player_slug}/games.json
 ```
 
 `/api/data.json` contains the full crawler database. `/api/games.json` is a
 flattened game list with server identity fields for clients such as MTC.
 `/api/configurations.json` exposes each game's parsed `*` configuration values
-and raw stats block.
+and raw stats block. Full per-game records also include `high_scores` and
+`raw_high_scores`; summary game records include `active_player_names` and
+`high_score_count`.
+
+To find games by active player on Apache, fetch `/api/players.json`, find the
+matching player `slug`, then fetch `/api/players/{player_slug}/games.json`.
+These player lookup files are generated for API clients but are not linked from
+the public pages.
 
 For local development, `twcrawl serve` also provides live extensionless REST
 routes that reload `data/twcrawl.json` on each request:
@@ -119,15 +131,24 @@ routes that reload `data/twcrawl.json` on each request:
 /api/servers/{server_id_or_slug}/games/{letter}
 /api/games
 /api/configurations
+/api/players
+/api/players/{player_slug_or_name}
+/api/players/{player_slug_or_name}/games
 ```
 
 List endpoints accept `full=1`; `/api/games` and `/api/configurations` also
-accept `server=` and `status=` filters.
+accept `server=`, `player=`, and `status=` filters. The `player=` filter is a
+case-insensitive active-player name substring match.
 
 Use `twcrawl crawl --missing --build` to retry only servers without current
 usable data. A server is considered missing current data when its last crawl did
 not finish online, it has never been crawled, it has no crawled game rows, or
 any game row has a non-`ok` status.
+
+Use `twcrawl online PLAYER` to do a live login check for a player already known
+from high-score crawl data. It connects only to servers where that player is in
+the generated player index, sends `#` at the TWGS server menu, and reports which
+known games the player is currently logged in to versus not logged in to.
 
 `data/servers.seed.json` is local generated configuration and is intentionally
 not tracked by git. Run `twcrawl init-seeds` once to create it, then edit it for

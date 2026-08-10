@@ -8,7 +8,8 @@ Replicate the MicroBlaster server crawler/bot function for TWGS servers:
 - Crawl each telnet endpoint with the bot name `twcrawl`.
 - Enumerate game letters from the TWGS server menu.
 - Enter each game, acknowledge optional `[Pause]`, request `*` game stats,
-  capture the structured output, exit the game, and continue.
+  capture the structured output, request `H` high scores, capture active-player
+  rows, exit the game, and continue.
 - Persist the result as JSON.
 - Generate static MicroBlaster-style `servers.aspx` and server-detail pages.
 
@@ -53,7 +54,20 @@ The runtime JSON is stored at `data/twcrawl.json`:
           "time": "480 Min",
           "turns": "25000 Turns",
           "sectors": 20000,
-          "players": 1
+          "players": 1,
+          "high_scores": [
+            {
+              "position": 1,
+              "rank": "10,616",
+              "rank_value": 10616,
+              "alignment": "3,077",
+              "alignment_value": 3077,
+              "corp": "**",
+              "name": "chewbacca",
+              "ship_type": "Imperial StarShip"
+            }
+          ],
+          "raw_high_scores": "Ranking Traders...\nTrade Wars 2002 Trader Rankings..."
         }
       ]
     }
@@ -89,6 +103,9 @@ The runtime JSON is stored at `data/twcrawl.json`:
    - Send `*`.
    - Capture from `Game Stats:` through `End Stats.`.
    - Parse the key/value stats.
+   - Send `H`.
+   - Acknowledge any `[Pause]` prompts.
+   - Capture and parse the high-score rows into `high_scores`.
    - Send `X` and wait for the server menu.
 9. Send `Q` and close.
 
@@ -101,3 +118,45 @@ The runtime JSON is stored at `data/twcrawl.json`:
 - `type`: `Open` unless `Closed Game=True`.
 - `bigbang`: TWGS game dates are normalized from the in-game year to the crawl
   timestamp year by matching `Local Game Time`.
+
+## Player lookup API
+
+`twcrawl build` generates a player lookup API from each game's `high_scores`
+rows. This is intended for clients such as MTC and is not linked from the
+generated HTML pages.
+
+Static Apache files:
+
+```text
+/api/players.json
+/api/players/{player_slug}.json
+/api/players/{player_slug}/games.json
+```
+
+`twcrawl serve` also supports:
+
+```text
+/api/games?player=chewbacca
+/api/configurations?player=chewbacca
+/api/players
+/api/players/chewbacca
+/api/players/chewbacca/games
+```
+
+Player slugs are generated from the active-player names in high scores. The
+`player=` query parameter is a case-insensitive substring match.
+
+## Live player online checks
+
+`twcrawl online PLAYER` is a probe command, not part of the static API. It uses
+the generated player index to limit work to servers where the player has known
+high-score entries, connects to each of those servers once, logs in as the bot,
+sends `#` at the TWGS server menu, and parses the `Players Online` node list.
+
+The command compares live player locations against the known games for that
+player on each server and reports:
+
+- games where the player is currently logged in;
+- known games on that server where the player is not currently logged in;
+- server-level online locations that could not be mapped to a game, such as
+  the TWGS menu.

@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from .api import api_response
 from .crawler import crawl_servers, load_or_seed, save_json
 from .importer import DEFAULT_ARCHIVE_URL, write_seed
+from .online import check_player_online, dumps_online_report, format_online_report
 from .render import build_site
 
 
@@ -52,6 +53,15 @@ def main(argv: list[str] | None = None) -> int:
     serve_parser.add_argument("--out", type=Path, default=DEFAULT_PUBLIC)
     serve_parser.add_argument("--port", type=int, default=8008)
 
+    online = sub.add_parser("online", help="check whether a known player is currently logged in")
+    online.add_argument("player", help="player name or generated player slug")
+    online.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    online.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
+    online.add_argument("--bot-name", default="twcrawl")
+    online.add_argument("--connect-timeout", type=float, default=12.0)
+    online.add_argument("--menu-timeout", type=float, default=20.0)
+    online.add_argument("--json", action="store_true", help="write machine-readable JSON")
+
     args = parser.parse_args(argv)
     if args.command == "init-seeds":
         try:
@@ -86,6 +96,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "serve":
         return serve_site(args.out, args.port, args.data, args.seeds)
+    if args.command == "online":
+        data = load_or_seed(args.data, args.seeds)
+        result = check_player_online(
+            data,
+            args.player,
+            bot_name=args.bot_name,
+            connect_timeout=args.connect_timeout,
+            menu_timeout=args.menu_timeout,
+        )
+        print(dumps_online_report(result) if args.json else format_online_report(result))
+        return 0
     return 1
 
 
