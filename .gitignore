@@ -5,6 +5,8 @@ __pycache__/
 data/twcrawl.json
 data/servers.seed.json
 data/logs/
+data/history/
+data/monitors/
 public/*
 !public/style.css
 !public/assets/

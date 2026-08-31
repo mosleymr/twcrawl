@@ -62,26 +62,140 @@ Open `http://127.0.0.1:8008/`.
 
 ```bash
 twcrawl init-seeds
+twcrawl add-server games.opentw.org 2002 OpenTW
 twcrawl crawl --all --build
 twcrawl crawl --missing --build
 twcrawl crawl --only "Gone Rogue" --build
 twcrawl build
 twcrawl serve --port 8008
 twcrawl online Freejack
+twcrawl search --player Freejack
+twcrawl search --edit SubZero
+twcrawl daily
+twcrawl monitor-mtc
 ```
 
 The same commands can also be run as a Python module on any platform:
 
 ```bash
 python -m twcrawl init-seeds
+python -m twcrawl add-server games.opentw.org 2002 OpenTW
 python -m twcrawl crawl --all --build
 python -m twcrawl crawl --missing --build
 python -m twcrawl serve --port 8008
 python -m twcrawl online Freejack --json
+python -m twcrawl search --player Freejack
+python -m twcrawl monitor-mtc --json
 ```
 
 By default the crawler stores state in `data/twcrawl.json` and generates pages
 under `public/`.
+
+## Adding servers
+
+Use `twcrawl add-server` with only the host or IP address, telnet port, and
+server display name:
+
+```bash
+twcrawl add-server games.opentw.org 2002 OpenTW
+twcrawl add-server 192.0.2.10 2002 "My TWGS"
+```
+
+Names with spaces can be quoted, or passed as separate trailing words:
+
+```bash
+twcrawl add-server games.example.net 2002 My TWGS
+```
+
+The command adds or updates the server in `data/twcrawl.json`, which is the
+active crawler database used by `crawl --only`. It also updates the local
+`data/servers.seed.json` by default so the server is kept if you later rebuild
+the active data from seeds. Both files are local runtime data and are ignored
+by git.
+
+After adding a server, crawl it:
+
+```bash
+twcrawl crawl --only OpenTW --build
+```
+
+Or do it in one step:
+
+```bash
+twcrawl add-server games.opentw.org 2002 OpenTW --crawl --build
+```
+
+Use `--no-seeds` if you only want to modify the active `data/twcrawl.json`
+file.
+
+## Daily runs and history
+
+`twcrawl daily` is the one-command scheduler entry point. It runs a crawl,
+writes `data/twcrawl.json`, rebuilds `public/`, and stores a timestamped JSON
+snapshot under `data/history/`:
+
+```bash
+twcrawl daily
+twcrawl daily --mode missing
+twcrawl daily --no-build
+twcrawl daily --only "Gone Rogue"
+```
+
+The latest history snapshot is also copied to `data/history/latest.json`, and a
+small `data/history/manifest.json` lists the saved snapshots. These runtime
+history files are intentionally ignored by git.
+
+On macOS/Linux, run it daily from cron with a line like:
+
+```cron
+15 4 * * * cd /path/to/twcrawl && /path/to/twcrawl/.venv/bin/twcrawl daily >> data/logs/daily.log 2>&1
+```
+
+On Windows Task Scheduler, create a daily task whose action is:
+
+```text
+Program: C:\path\to\twcrawl\.venv\Scripts\twcrawl.exe
+Arguments: daily
+Start in: C:\path\to\twcrawl
+```
+
+## Search
+
+`twcrawl search` searches the current crawler data. Use positional text or
+`--edit` for game/edit/template/config text, and `--player` for high-score
+player names:
+
+```bash
+twcrawl search SubZero
+twcrawl search --edit "Poker Run"
+twcrawl search --player Freejack
+twcrawl search --server "The City" --player reaper
+twcrawl search --json --player Freejack
+```
+
+Text search covers server identity, game name, original menu name, basic table
+fields, and parsed `*` stats keys/values.
+
+## MTC recent-game monitor
+
+`twcrawl monitor-mtc` scans MTC game config files modified in the last 60 days
+under `/Users/mosleym/twx/games`, matches them to crawled twcrawl games by
+`Host:Port` plus `GameLetter`, compares the current high-score player list with
+the previous monitor state, and checks who is currently online by sending `#`
+at each matched TWGS server menu.
+
+```bash
+twcrawl monitor-mtc
+twcrawl monitor-mtc --days 30
+twcrawl monitor-mtc --no-live
+twcrawl monitor-mtc --json
+```
+
+State is stored in `data/monitors/mtc-recent.json`; the last full report is
+stored beside it as `data/monitors/mtc-recent-last-report.json`. On the first
+run, each matched game creates a baseline. Later runs report players who appear
+in a game's high scores that were not present during the previous monitor run,
+plus currently logged-in players from the live `#` check.
 
 ## REST/API output
 

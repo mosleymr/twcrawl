@@ -49,6 +49,117 @@ def load_or_seed(data_path: Path, seed_path: Path) -> dict:
     return data
 
 
+def add_server(
+    data: dict,
+    *,
+    host: str,
+    port: int,
+    name: str,
+) -> tuple[dict, str, dict]:
+    host = normalize_host(host)
+    if not name.strip():
+        raise ValueError("server name is required")
+    if port < 1 or port > 65535:
+        raise ValueError(f"port must be between 1 and 65535, got {port}")
+
+    name = " ".join(name.split())
+    telnet = f"{host}:{port}"
+    servers = data.setdefault("servers", [])
+    target_slug = slugify(name)
+    existing = find_existing_server(servers, telnet=telnet, slug=target_slug, name=name)
+
+    if existing is None:
+        server_id = unique_server_id(servers, target_slug)
+        server = {
+            "archived_detail_url": "",
+            "bbs": "",
+            "game_count": 0,
+            "games": [],
+            "last_bigbang": "",
+            "name": name,
+            "players": 0,
+            "server_id": server_id,
+            "slug": unique_server_slug(servers, target_slug),
+            "status": "seed",
+            "telnet": telnet,
+            "tradewars_version": "",
+            "type": "twgs2",
+        }
+        servers.append(server)
+        action = "added"
+    else:
+        old_telnet = existing.get("telnet")
+        existing["name"] = name
+        existing["telnet"] = telnet
+        existing.setdefault("server_id", unique_server_id(servers, target_slug, exclude=existing))
+        existing.setdefault("slug", unique_server_slug(servers, target_slug, exclude=existing))
+        existing.setdefault("type", "twgs2")
+        existing.setdefault("tradewars_version", "")
+        existing.setdefault("last_bigbang", "")
+        existing.setdefault("game_count", 0)
+        existing.setdefault("players", 0)
+        existing.setdefault("games", [])
+        if old_telnet != telnet:
+            existing["status"] = "seed"
+            existing.pop("error", None)
+            existing.pop("last_crawled_at", None)
+        server = existing
+        action = "updated"
+
+    data["generated_at"] = datetime.now(timezone.utc).isoformat()
+    return data, action, server
+
+
+def normalize_host(value: str) -> str:
+    host = value.strip()
+    if "://" in host:
+        parsed = urlparse(host)
+        host = parsed.hostname or ""
+    elif ":" in host and not host.startswith("["):
+        parsed_host, _, parsed_port = host.rpartition(":")
+        if parsed_host and parsed_port.isdigit():
+            host = parsed_host
+    host = host.strip("[]")
+    if not host:
+        raise ValueError("host is required")
+    return host
+
+
+def find_existing_server(servers: list[dict], *, telnet: str, slug: str, name: str) -> dict | None:
+    folded_telnet = telnet.casefold()
+    folded_name = name.casefold()
+    for server in servers:
+        if str(server.get("telnet") or "").casefold() == folded_telnet:
+            return server
+    for server in servers:
+        if str(server.get("slug") or "").casefold() == slug.casefold():
+            return server
+    for server in servers:
+        if str(server.get("name") or "").casefold() == folded_name:
+            return server
+    return None
+
+
+def unique_server_id(servers: list[dict], base: str, *, exclude: dict | None = None) -> str:
+    used = {str(server.get("server_id") or "") for server in servers if server is not exclude}
+    return unique_token(base, used)
+
+
+def unique_server_slug(servers: list[dict], base: str, *, exclude: dict | None = None) -> str:
+    used = {str(server.get("slug") or "") for server in servers if server is not exclude}
+    return unique_token(base, used)
+
+
+def unique_token(base: str, used: set[str]) -> str:
+    token = base or "server"
+    candidate = token
+    index = 2
+    while candidate in used:
+        candidate = f"{token}-{index}"
+        index += 1
+    return candidate
+
+
 def crawl_servers(
     data: dict,
     *,

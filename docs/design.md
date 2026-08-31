@@ -17,12 +17,18 @@ Replicate the MicroBlaster server crawler/bot function for TWGS servers:
 
 - `twcrawl.importer`: imports the archived MicroBlaster TWGS2 server table into
   `data/servers.seed.json`.
+- `twcrawl.crawler.add_server`: local server-list upsert helper used by
+  `twcrawl add-server`.
 - `twcrawl.telnet`: small RFC 854 telnet client with TWGS-compatible initial
   handshake, terminal-type response, NAWS response, and ANSI/CP437 cleaning.
 - `twcrawl.crawler`: TWGS menu state machine and JSON persistence.
 - `twcrawl.parser`: server menu parser plus `Game Stats` key/value parser.
 - `twcrawl.render`: static HTML/CSS generator for the server list and one
   detail page per server.
+- `twcrawl.history`: timestamped crawl snapshot storage for scheduled runs.
+- `twcrawl.search`: flattened game search by game/edit/config text and player.
+- `twcrawl.mtc_monitor`: recent MTC game config scanner, high-score delta
+  monitor, and live `#` online checker.
 - `twcrawl.cli`: command line interface.
 
 ## Data model
@@ -74,6 +80,26 @@ The runtime JSON is stored at `data/twcrawl.json`:
   ]
 }
 ```
+
+## Adding servers
+
+`twcrawl add-server HOST PORT NAME` adds or updates a server using only the
+connection endpoint and display name:
+
+```bash
+twcrawl add-server games.opentw.org 2002 OpenTW
+twcrawl add-server games.example.net 2002 My TWGS
+```
+
+The command writes the active data file (`data/twcrawl.json`) and, unless
+`--no-seeds` is supplied, also writes the local seed file
+(`data/servers.seed.json`). The command generates a stable slug/server id from
+the display name for new servers, updates an existing row when the telnet
+endpoint, slug, or name already exists, and resets crawl status only when an
+existing row's endpoint changes.
+
+Use `--crawl --build` to immediately crawl the new server and rebuild the
+static site/API.
 
 ## Crawl state machine
 
@@ -160,3 +186,40 @@ player on each server and reports:
 - known games on that server where the player is not currently logged in;
 - server-level online locations that could not be mapped to a game, such as
   the TWGS menu.
+
+## Daily history
+
+`twcrawl daily` is the scheduler-oriented command. It runs the normal crawler,
+writes `data/twcrawl.json`, rebuilds the public site by default, and stores a
+timestamped full JSON snapshot in `data/history/`. `latest.json` is maintained
+as a copy of the newest snapshot, and `manifest.json` lists snapshots.
+
+Runtime history is ignored by git because deployments should not overwrite
+crawler data on pull.
+
+## Search command
+
+`twcrawl search` reads `data/twcrawl.json` and searches flattened game rows.
+The positional query and `--edit` search server identity, game name, original
+menu name, summary fields, and parsed `*` stats keys/values. `--player` filters
+by active-player high-score name substring. `--json` returns the same full game
+records used by API clients.
+
+## MTC recent-game monitor
+
+`twcrawl monitor-mtc` scans MTC game config JSON files under
+`/Users/mosleym/twx/games` that were modified within a configurable window
+(`--days`, default 60). It uses each config's `Host`, `Port`, and `GameLetter`
+to find the matching twcrawl server/game, then:
+
+- compares current high-score names with the previous monitor state;
+- reports newly seen players after the first baseline run;
+- sends `#` once per matched server to list currently online players;
+- maps online locations back to the monitored game letters.
+
+Monitor state is stored under `data/monitors/`, which is ignored by git:
+
+```text
+data/monitors/mtc-recent.json
+data/monitors/mtc-recent-last-report.json
+```
