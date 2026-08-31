@@ -346,6 +346,8 @@ def enrich_game_names_from_descriptions(telnet: TelnetSession, games: list[dict]
         description_menu = wait_for_description_menu(telnet, since=description_start, timeout=timeout)
     except TelnetError:
         return enriched
+    if description_menu_is_server_menu(description_menu, games):
+        return enriched
 
     summary_names = parse_game_description_summary(description_menu)
     detail_failed = False
@@ -368,6 +370,17 @@ def enrich_game_names_from_descriptions(telnet: TelnetSession, games: list[dict]
 
     return_to_server_menu_from_descriptions(telnet, timeout=timeout)
     return enriched
+
+
+def description_menu_is_server_menu(text: str, games: list[dict]) -> bool:
+    info = parse_server_menu(text)
+    menu_letters = {game.get("letter") for game in info.get("menu_games", [])}
+    expected_letters = {game.get("letter") for game in games}
+    if not menu_letters or menu_letters != expected_letters:
+        return False
+    if re.search(r"Selection\s*\(\?\s*for\s*menu\)\s*:\s*$", text, re.IGNORECASE | re.MULTILINE):
+        return True
+    return bool(SERVER_MENU_PROMPT_RE.search(text) and "<!>" in text)
 
 
 def wait_for_description_menu(telnet: TelnetSession, *, since: int, timeout: float) -> str:
