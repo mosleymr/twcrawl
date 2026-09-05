@@ -6,10 +6,11 @@ Replicate the MicroBlaster server crawler/bot function for TWGS servers:
 
 - Maintain a seed list of known TradeWars servers.
 - Crawl each telnet endpoint with the bot name `twcrawl`.
-- Enumerate game letters from the TWGS server menu.
-- Enter each game, acknowledge optional `[Pause]`, request `*` game stats,
-  capture the structured output, request `H` high scores, capture active-player
-  rows, exit the game, and continue.
+- Request TWGS `$` XML when available and use it as the preferred source for
+  game letters, names, and configuration.
+- Enter playable games, acknowledge optional `[Pause]`, request `*` game stats,
+  capture any runtime values not present in XML, request `H` high scores,
+  capture active-player rows, exit the game, and continue.
 - Persist the result as JSON.
 - Generate static MicroBlaster-style `servers.aspx` and server-detail pages.
 
@@ -22,7 +23,8 @@ Replicate the MicroBlaster server crawler/bot function for TWGS servers:
 - `twcrawl.telnet`: small RFC 854 telnet client with TWGS-compatible initial
   handshake, terminal-type response, NAWS response, and ANSI/CP437 cleaning.
 - `twcrawl.crawler`: TWGS menu state machine and JSON persistence.
-- `twcrawl.parser`: server menu parser plus `Game Stats` key/value parser.
+- `twcrawl.parser`: server menu parser, TWGS `$` XML parser, and `Game Stats`
+  key/value parser.
 - `twcrawl.render`: static HTML/CSS generator for the server list and one
   detail page per server.
 - `twcrawl.history`: timestamped crawl snapshot storage for scheduled runs.
@@ -118,22 +120,27 @@ static site/API.
    `Select a game :`. If a customized ANSI menu displays game letters and then
    waits for input without printing any prompt, treat the menu as ready after
    output goes quiet briefly.
-7. Parse game entries from the server menu, including both `<A> Game Name`
+7. Send `$` and, if a complete `<TWGSData>` document is returned, parse it as
+   the authoritative game list and configuration source. This captures configured
+   games that may be omitted from the visible menu, including closed games.
+8. Parse game entries from the server menu, including both `<A> Game Name`
    and customized `A. Game Name` formats. Adjacent entries such as
    `A. First GameB. Second Game` are supported. Ignore non-game commands such
-   as `<Q>`.
-8. For each game:
+   as `<Q>`. This menu list is the fallback when `$` XML is unavailable.
+9. For each game:
+   - Skip entry for XML games marked closed or without multiplayer access, but
+     keep the XML-derived row in the data and generated pages.
    - Send the game letter.
    - Wait for `Enter your choice:`.
    - If `[Pause]` appears, send Enter and keep waiting.
-   - Send `*`.
-   - Capture from `Game Stats:` through `End Stats.`.
-   - Parse the key/value stats.
+   - If XML did not provide configuration stats, send `*`.
+   - Capture from `Game Stats:` through `End Stats.` when `*` is needed.
+   - Parse the key/value stats and merge them with any XML-derived values.
    - Send `H`.
    - Acknowledge any `[Pause]` prompts.
    - Capture and parse the high-score rows into `high_scores`.
    - Send `X` and wait for the server menu.
-9. Send `Q` and close.
+10. Send `Q` and close.
 
 ## Derived fields
 
@@ -144,6 +151,9 @@ static site/API.
 - `type`: `Open` unless `Closed Game=True`.
 - `bigbang`: TWGS game dates are normalized from the in-game year to the crawl
   timestamp year by matching `Local Game Time`.
+- `xml`: structured TWGS `$` sections for each game when the server supports
+  XML.
+- `raw_xml`: the raw `<Game>` XML fragment for each XML-derived game.
 
 ## Player lookup API
 

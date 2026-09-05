@@ -5,9 +5,9 @@ defunct MicroBlaster server-list workflow:
 
 1. Read a JSON seed list of known TWGS servers.
 2. Open a telnet connection to each server.
-3. Login with the crawler name, enumerate the game letters from the TWGS menu,
-   enter each game, press `*` at `Enter your choice:`, capture `Game Stats`,
-   press `H` to capture the active-player high score table, exit, and continue.
+3. Login with the crawler name, request TWGS `$` XML game data when available,
+   then enter playable games to capture `H` active-player high scores. When XML
+   is unavailable, fall back to pressing `*` for `Game Stats` before `H`.
 4. Store the crawl result in JSON.
 5. Generate static MicroBlaster-style HTML pages.
 
@@ -222,9 +222,10 @@ Useful Apache-served JSON endpoints:
 
 `/api/data.json` contains the full crawler database. `/api/games.json` is a
 flattened game list with server identity fields for clients such as MTC.
-`/api/configurations.json` exposes each game's parsed `*` configuration values
-and raw stats block. Full per-game records also include `high_scores` and
-`raw_high_scores`; summary game records include `active_player_names` and
+`/api/configurations.json` exposes each game's parsed configuration values and
+raw `*` stats block when captured. Full per-game records also include
+`high_scores`, `raw_high_scores`, and any TWGS `$` XML data as `xml` /
+`raw_xml`; summary game records include `active_player_names` and
 `high_score_count`.
 
 To find games by active player on Apache, fetch `/api/players.json`, find the
@@ -277,6 +278,9 @@ twcrawl init-seeds --force
 
 - The crawler and web server are cross-platform Python code. They use only the
   Python standard library plus the package metadata in `pyproject.toml`.
+- When a TWGS server supports `$`, the XML response is used as the preferred
+  server/game source. It exposes cleaner game names and configured games that
+  may not appear on the normal menu yet; closed games are stored but not entered.
 - TWGS expects real telnet negotiation. `twcrawl` sends the same initial telnet
   handshake style used by TWX/MTC and responds to terminal type, NAWS, and
   suppress-go-ahead options.

@@ -208,6 +208,8 @@ def all_configurations(data: dict, params: dict[str, list[str]]) -> list[dict]:
                     "game_status": game.get("status"),
                     "stats": game.get("stats") or {},
                     "raw_stats": game.get("raw_stats") or "",
+                    "xml": game.get("xml") or {},
+                    "raw_xml": game.get("raw_xml") or "",
                     "high_scores": game.get("high_scores") or [],
                     "raw_high_scores": game.get("raw_high_scores") or "",
                 }
@@ -352,6 +354,8 @@ def game_payload(server: dict, game: dict, *, full: bool = False) -> dict:
             payload["raw_name"] = game.get("name")
         payload["stats"] = game.get("stats") or {}
         payload["raw_stats"] = game.get("raw_stats") or ""
+        payload["xml"] = game.get("xml") or {}
+        payload["raw_xml"] = game.get("raw_xml") or ""
         payload["high_scores"] = game.get("high_scores") or []
         payload["raw_high_scores"] = game.get("raw_high_scores") or ""
         payload["game"] = game

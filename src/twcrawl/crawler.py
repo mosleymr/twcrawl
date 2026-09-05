@@ -13,6 +13,7 @@ from .parser import (
     parse_game_stats,
     parse_high_scores,
     parse_server_menu,
+    parse_twgs_xml,
 )
 from .telnet import TelnetError, TelnetSession
 
@@ -28,6 +29,7 @@ DESCRIPTION_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 DESCRIPTION_PAUSE_MARKERS = ("[Pause]", "[ANY KEY]", "[Any key")
+TWGS_XML_END = "</TWGSData>"
 
 
 def load_json(path: Path) -> dict:
@@ -223,7 +225,16 @@ def needs_current_data(server: dict) -> bool:
         return True
     if not games:
         return True
-    return any(game.get("status") != "ok" for game in games)
+    return any(not has_current_game_data(game) for game in games)
+
+
+def has_current_game_data(game: dict) -> bool:
+    return (
+        game.get("status") == "ok"
+        or game.get("status") == "xml"
+        or bool(game.get("stats"))
+        or bool(game.get("raw_stats"))
+    )
 
 
 def crawl_server(
@@ -241,30 +252,50 @@ def crawl_server(
         menu_start = len(telnet.text)
         menu, server_info = wait_for_server_menu(telnet, since=menu_start, timeout=20.0)
         games = server_info.pop("menu_games", [])
-        games = enrich_game_names_from_descriptions(telnet, games, timeout=min(game_timeout, 15.0))
+        xml_info = fetch_twgs_xml(telnet, crawl_time, timeout=max(game_timeout, 45.0))
+        xml_games = xml_info.pop("xml_games", [])
+        if xml_info:
+            merge_server_info(server_info, xml_info)
+        if xml_games:
+            games = merge_game_lists(xml_games, games)
+        else:
+            games = enrich_game_names_from_descriptions(telnet, games, timeout=min(game_timeout, 15.0))
 
         crawled_games: list[dict] = []
         for game in games:
+            if not should_enter_game(game):
+                crawled_games.append(game)
+                continue
             game_start = len(telnet.text)
             telnet.send_line(game["letter"])
             try:
                 telnet.wait_for("Enter your choice:", timeout=game_timeout, auto_pause=True, since=game_start)
             except TelnetError as exc:
-                crawled_games.append({**game, "status": "error", "error": str(exc)})
+                game_result = {**game}
+                if game_result.get("stats"):
+                    game_result["status"] = "xml"
+                    game_result["crawl_error"] = str(exc)
+                else:
+                    game_result["status"] = "error"
+                    game_result["error"] = str(exc)
+                crawled_games.append(game_result)
                 recover_to_menu(telnet)
                 continue
 
             game_result = {**game}
-            stats_start = len(telnet.text)
-            telnet.send_line("*")
-            try:
-                stats_text = telnet.wait_for("Enter your choice:", timeout=game_timeout, since=stats_start)
-                parsed = parse_game_stats(stats_text, crawl_time)
-                game_result.update(parsed)
-                game_result["status"] = "ok"
-            except TelnetError as exc:
-                game_result["status"] = "error"
-                game_result["error"] = str(exc)
+            if game_result.get("stats"):
+                game_result["status"] = "xml"
+            else:
+                stats_start = len(telnet.text)
+                telnet.send_line("*")
+                try:
+                    stats_text = telnet.wait_for("Enter your choice:", timeout=game_timeout, since=stats_start)
+                    parsed = parse_game_stats(stats_text, crawl_time)
+                    game_result.update(parsed)
+                    game_result["status"] = "ok"
+                except TelnetError as exc:
+                    game_result["status"] = "error"
+                    game_result["error"] = str(exc)
 
             high_scores_start = len(telnet.text)
             telnet.send_line("H")
@@ -276,6 +307,8 @@ def crawl_server(
                     auto_pause=True,
                 )
                 game_result.update(parse_high_scores(high_scores_text))
+                if game_result.get("stats"):
+                    game_result["status"] = "ok"
             except TelnetError as exc:
                 game_result["high_scores_error"] = str(exc)
 
@@ -300,6 +333,68 @@ def crawl_server(
     server_info["last_crawled_at"] = crawl_time.isoformat()
     server_info["crawl_transcript"] = menu[0:0]
     return server_info
+
+
+def fetch_twgs_xml(telnet: TelnetSession, crawl_time: datetime, *, timeout: float) -> dict:
+    xml_start = len(telnet.text)
+    telnet.send_line("$")
+    try:
+        text = wait_for_twgs_xml(telnet, since=xml_start, timeout=timeout)
+    except TelnetError:
+        return {}
+    parsed = parse_twgs_xml(text, crawl_time)
+    if not parsed:
+        return {}
+    return parsed
+
+
+def merge_server_info(server_info: dict, xml_info: dict) -> None:
+    for key, value in xml_info.items():
+        if value in (None, "", []):
+            continue
+        if key == "tradewars_version" and server_info.get(key):
+            continue
+        server_info[key] = value
+
+
+def wait_for_twgs_xml(telnet: TelnetSession, *, since: int, timeout: float) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        window = telnet.text[since:]
+        if TWGS_XML_END in window:
+            return window
+        if window.strip() and "<TWGSData>" not in window and SERVER_MENU_PROMPT_RE.search(window):
+            return window
+        telnet.read_available(0.25)
+    raise TelnetError(f"timed out waiting for TWGS XML from {telnet.host}:{telnet.port}")
+
+
+def merge_game_lists(primary: list[dict], fallback: list[dict]) -> list[dict]:
+    games_by_letter: dict[str, dict] = {}
+    for game in fallback:
+        letter = str(game.get("letter") or "").upper()
+        if letter:
+            games_by_letter[letter] = {**game}
+    for game in primary:
+        letter = str(game.get("letter") or "").upper()
+        if not letter:
+            continue
+        merged = {**games_by_letter.get(letter, {}), **game}
+        games_by_letter[letter] = merged
+    return [games_by_letter[letter] for letter in sorted(games_by_letter)]
+
+
+def should_enter_game(game: dict) -> bool:
+    stats = game.get("stats") or {}
+    if str(stats.get("Closed Game") or "").strip().lower() in {"true", "yes", "1", "on"}:
+        return False
+    schedule = " ".join(
+        str(value)
+        for value in ((game.get("xml") or {}).get("AccessSchedule") or {}).values()
+    ).lower()
+    if schedule and "multiplayer access" not in schedule:
+        return False
+    return True
 
 
 def wait_for_server_menu(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import calendar
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 
@@ -11,6 +12,134 @@ DESCRIPTION_TITLE_RE = re.compile(r"^[ \t]*([A-Z])[ \t]{2,}(.+?)[ \t]*$", re.MUL
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 LINE_ART_RE = re.compile(r"[╔╗╚╝╠╣╦╩╬═║▐▌▄▀█▓▒░■□▪▬▔▁▂▃▅▆▇·].*")
 DESCRIPTION_ART_RE = re.compile(r"^[\\/_|\- ._=`~^]+$")
+TWGS_XML_END = "</TWGSData>"
+
+XML_STAT_KEYS = {
+    "GoldEnabled": "Gold Enabled",
+    "MBBSCompatibility": "MBBS Compatibility",
+    "StartDay": "Start Day",
+    "GameAge": "Game Age",
+    "LastExternDay": "Last Extern Day",
+    "InternalAliens": "Internal Aliens",
+    "InternalFerrengi": "Internal Ferrengi",
+    "ClosedGame": "Closed Game",
+    "ShowStardock": "Show Stardock",
+    "TurnBase": "Turn Base",
+    "TimeOnline": "Time Online",
+    "InactiveTime": "Inactive Time",
+    "LastBustClearDay": "Last Bust Clear Day",
+    "InitialFighters": "Initial Fighters",
+    "InitialCredits": "Initial Credits",
+    "InitialHolds": "Initial Holds",
+    "NewPlayerPlanets": "New Player Planets",
+    "DaysTilDeletion": "Days Til Deletion",
+    "ColonistRegenRate": "Colonist Regen Rate",
+    "MaxPlanetSector": "Max Planet Sector",
+    "MaxCorpMembers": "Max Corp Members",
+    "FedSpaceShipLimit": "FedSpace Ship Limit",
+    "PhotonMissileDuration": "Photon Missile Duration",
+    "FedSpacePhotons": "FedSpace Photons",
+    "PhotonsDisablePlayers": "Photons Disable Players",
+    "CloakFailPercent": "Cloak Fail Percent",
+    "DebrisLossPercent": "Debris Loss Percent",
+    "TradePercent": "Trade Percent",
+    "StealBuy": "Steal Buy",
+    "ProductionRate": "Production Rate",
+    "MaxProductionRegen": "Max Production Regen",
+    "MultiplePhotons": "Multiple Photons",
+    "ClearBustDays": "Clear Bust Days",
+    "StealFactor": "Steal Factor",
+    "RobFactor": "Rob Factor",
+    "PortProductionMax": "Port Production Max",
+    "RadiationLifetime": "Radiation Lifetime",
+    "FighterLockDecay": "Fighter Lock Decay",
+    "InvincibleFerengal": "Invincible Ferengal",
+    "MBBSCombat": "MBBS Combat",
+    "DeathDelay": "Death Delay",
+    "DeathsPerDay": "Deaths Per Day",
+    "StartupAssetDropoff": "Startup Asset Dropoff",
+    "ShowWhosOnline": "Show Whos Online",
+    "InteractiveSub-prompts": "Interactive Sub-prompts",
+    "AllowAliases": "Allow Aliases",
+    "AlienSleepMode": "Alien Sleep Mode",
+    "AllowMBBSMegaRobBug": "Allow MBBS MegaRob Bug",
+    "MaxTerraColonists": "Max Terra Colonists",
+    "MinimumLoginTime": "Minimum Login Time",
+    "TurnAccumulationDays": "Turn Accumulation Days",
+    "PodlessCaptures": "Podless Captures",
+    "CaptureFailPercent": "Capture Fail Percent",
+    "MaxBankCredits": "Max Bank Credits",
+    "HighScoreMode": "High Score Mode",
+    "HighScoreType": "High Score Type",
+    "RankingsMode": "Rankings Mode",
+    "RankingsType": "Rankings Type",
+    "EntryLogBlackout": "Entry Log Blackout",
+    "GameLogBlackout": "Game Log Blackout",
+    "PortReportDelay": "Port Report Delay",
+    "InputBandwidth": "Input Bandwidth",
+    "OutputBandwidth": "Output Bandwidth",
+    "Latency": "Latency",
+    "ShipDelay": "Ship Delay",
+    "PlanetDelay": "Planet Delay",
+    "OtherAttacksDelay": "Other Attacks Delay",
+    "EProbeDelay": "EProbe Delay",
+    "CrimeDelay": "Crime Delay",
+    "PhotonLaunchDelay": "Photon Launch Delay",
+    "PhotonWaveDelay": "Photon Wave Delay",
+    "GenesisLaunchDelay": "Genesis Launch Delay",
+    "ICPowerupDelay": "IC Powerup Delay",
+    "PIGPowerupDelay": "PIG Powerup Delay",
+    "PlanetLandingTakeoffDelay": "Planet Landing/Takeoff Delay",
+    "PortDockDepartDelay": "Port Dock/Depart Delay",
+    "ShipTransporterDelay": "Ship Transporter Delay",
+    "PlanetTransporterDelay": "Planet Transporter Delay",
+    "TakeDropFightersDelay": "Take/Drop Fighters Delay",
+    "DropTakeMinesDelay": "Drop/Take Mines Delay",
+    "TavernAnnouncement": "Tavern Announcement",
+    "LimpetRemoval": "Limpet Removal",
+    "ReregisterShip": "Reregister Ship",
+    "CitadelTransportUnit": "Citadel Transport Unit",
+    "CitadelTransportUpgrade": "Citadel Transport Upgrade",
+    "GenesisTorpedo": "Genesis Torpedo",
+    "ArmidMine": "Armid Mine",
+    "LimpetMine": "Limpet Mine",
+    "TypeITWarp": "Type I TWarp",
+    "TypeIITWarp": "Type II TWarp",
+    "TWarpUpgrade": "TWarp Upgrade",
+    "PsychicProbe": "Psychic Probe",
+    "PlanetScanner": "Planet Scanner",
+    "AtomicDetonator": "Atomic Detonator",
+    "EtherProbe": "Ether Probe",
+    "PhotonMissile": "Photon Missile",
+    "CloakingDevice": "Cloaking Device",
+    "MineDisruptor": "Mine Disruptor",
+    "HolographicScanner": "Holographic Scanner",
+    "DensityScanner": "Density Scanner",
+    "Sectors": "Sectors",
+    "Users": "Users",
+    "Aliens": "Aliens",
+    "Ships": "Ships",
+    "Ports": "Ports",
+    "Planets": "Planets",
+    "MaxCourseLength": "Max Course Length",
+    "TournamentMode": "Tournament Mode",
+    "DaysToEnter": "Days To Enter",
+    "LockoutMode": "Lockout Mode",
+    "MaxTimesBlownUp": "Max Times Blown Up",
+    "ActivePlayers": "Active Players",
+    "PercentPlayersGood": "Percent Players Good",
+    "ActiveAliens": "Active Aliens",
+    "PercentAliensGood": "Percent Aliens Good",
+    "ActivePorts": "Active Ports",
+    "PortValue": "Port Value",
+    "ActivePlanets": "Active Planets",
+    "PercentPlanetCitadels": "Percent Planet Citadels",
+    "ActiveShips": "Active Ships",
+    "ActiveCorps": "Active Corps",
+    "ActiveFigs": "Active Figs",
+    "ActiveMines": "Active Mines",
+    "LocalGameTime": "Local Game Time",
+}
 
 
 def parse_server_menu(text: str) -> dict:
@@ -138,6 +267,143 @@ def parse_game_stats(text: str, crawl_time: datetime) -> dict:
     result["sectors"] = int_value(values.get("Sectors"))
     result["players"] = int_value(values.get("Active Players"))
     return result
+
+
+def parse_twgs_xml(text: str, crawl_time: datetime) -> dict:
+    xml = extract_twgs_xml(text)
+    if not xml:
+        return {}
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return {}
+    server_node = root.find("Server")
+    server_info = parse_xml_server(server_node)
+    game_version = {
+        "Major Version": child_text(server_node, "GameMajorVersion"),
+        "Minor Version": child_text(server_node, "GameMinorVersion"),
+    }
+    server_game_year = game_year(child_text(server_node, "ServerLocalTime"))
+
+    games = []
+    for game_node in root.findall("./Games/Game"):
+        parsed = parse_xml_game(game_node, crawl_time, game_version, server_game_year)
+        if parsed:
+            games.append(parsed)
+    server_info["xml_games"] = games
+    server_info["twgs_xml"] = {
+        "game_count": len(games),
+    }
+    return server_info
+
+
+def extract_twgs_xml(text: str) -> str:
+    start = text.find("<TWGSData>")
+    end = text.find(TWGS_XML_END, start)
+    if start == -1 or end == -1:
+        return ""
+    return text[start : end + len(TWGS_XML_END)]
+
+
+def parse_xml_server(server_node: ET.Element | None) -> dict:
+    if server_node is None:
+        return {}
+    info: dict = {}
+    host = child_text(server_node, "Host")
+    if host:
+        info["registered_to"] = host
+    slots = int_value(child_text(server_node, "Slots"))
+    if slots is not None:
+        info["supports_games"] = slots
+    nodes = int_value(child_text(server_node, "Nodes"))
+    if nodes is not None:
+        info["nodes"] = nodes
+    major = child_text(server_node, "ServerMajorVersion")
+    minor = child_text(server_node, "ServerMinorVersion")
+    if major and minor:
+        info["tradewars_version"] = f"TWGS {major}.{minor}"
+    info["server_local_time"] = child_text(server_node, "ServerLocalTime")
+    info["server_local_time_zone"] = child_text(server_node, "ServerLocalTimeZone")
+    return {key: value for key, value in info.items() if value not in {None, ""}}
+
+
+def parse_xml_game(
+    game_node: ET.Element,
+    crawl_time: datetime,
+    game_version: dict[str, str],
+    server_game_year: int | None,
+) -> dict:
+    letter = child_text(game_node, "./ID/GameSlot").upper()
+    name = child_text(game_node, "./ID/GameName")
+    if not letter or not name:
+        return {}
+
+    stats = xml_game_stats(game_node)
+    for key, value in game_version.items():
+        if value:
+            stats.setdefault(key, value)
+    local_game_year = game_year(stats.get("Local Game Time")) or server_game_year
+
+    result: dict = {
+        "letter": letter,
+        "name": name,
+        "name_source": "twgs_xml",
+        "status": "xml",
+        "stats": stats,
+        "xml": xml_game_sections(game_node),
+        "raw_xml": ET.tostring(game_node, encoding="unicode"),
+    }
+    result["bigbang"] = normalize_game_date(stats.get("Start Day"), local_game_year, crawl_time)
+    result["days_open"] = int_value(stats.get("Game Age"))
+    result["type"] = "Closed" if truthy(stats.get("Closed Game")) else "Open"
+    result["version"] = format_game_version(stats)
+    result["emulation"] = short_bandwidth(stats.get("Input Bandwidth") or stats.get("Output Bandwidth"))
+    result["time"] = stats.get("Time Online", "")
+    result["turns"] = stats.get("Turn Base", "")
+    result["sectors"] = int_value(stats.get("Sectors"))
+    result["players"] = int_value(stats.get("Active Players"))
+    return result
+
+
+def xml_game_stats(game_node: ET.Element) -> dict[str, str]:
+    stats: dict[str, str] = {}
+    for node in game_node.iter():
+        if node is game_node or list(node):
+            continue
+        text = (node.text or "").strip()
+        if not text:
+            continue
+        key = XML_STAT_KEYS.get(node.tag)
+        if key:
+            stats[key] = text
+    return stats
+
+
+def xml_game_sections(game_node: ET.Element) -> dict[str, dict[str, str]]:
+    sections: dict[str, dict[str, str]] = {}
+    for section in list(game_node):
+        values = xml_section_values(section)
+        if values:
+            sections[section.tag] = values
+    return sections
+
+
+def xml_section_values(node: ET.Element) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for child in node.iter():
+        if child is node or list(child):
+            continue
+        text = (child.text or "").strip()
+        if text:
+            values[child.tag] = text
+    return values
+
+
+def child_text(node: ET.Element | None, path: str) -> str:
+    if node is None:
+        return ""
+    child = node.find(path)
+    return (child.text or "").strip() if child is not None and child.text else ""
 
 
 def parse_high_scores(text: str) -> dict:
