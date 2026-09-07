@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from .parser import clean_menu_game_name
+from .server_meta import server_display_gameop, server_display_type, server_display_version
 
 
 def api_response(data: dict, path: str, query: str = "") -> tuple[int, dict]:
@@ -309,16 +310,24 @@ def slugify(value: str) -> str:
 
 def server_payload(server: dict, *, full: bool = False) -> dict:
     if full:
-        return server
+        payload = dict(server)
+        payload["type"] = server_display_type(server)
+        payload["tradewars_version"] = server_display_version(server)
+        gameop = server_display_gameop(server)
+        if gameop:
+            payload["gameop"] = gameop
+        return payload
     keys = [
         "server_id",
         "slug",
         "name",
         "telnet",
         "status",
+        "type",
         "last_crawled_at",
         "last_bigbang",
         "tradewars_version",
+        "gameop",
         "game_count",
         "players",
         "registered_to",
@@ -326,7 +335,13 @@ def server_payload(server: dict, *, full: bool = False) -> dict:
         "nodes",
         "error",
     ]
-    return {key: server.get(key) for key in keys if key in server}
+    payload = {key: server.get(key) for key in keys if key in server}
+    payload["type"] = server_display_type(server)
+    payload["tradewars_version"] = server_display_version(server)
+    gameop = server_display_gameop(server)
+    if gameop:
+        payload["gameop"] = gameop
+    return payload
 
 
 def game_payload(server: dict, game: dict, *, full: bool = False) -> dict:
@@ -374,6 +389,9 @@ def server_identity(server: dict) -> dict:
         "server_name": server.get("name"),
         "server_telnet": server.get("telnet"),
         "server_status": server.get("status"),
+        "server_type": server_display_type(server),
+        "server_version": server_display_version(server),
+        "server_gameop": server_display_gameop(server),
     }
 
 

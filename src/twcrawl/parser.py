@@ -144,8 +144,14 @@ XML_STAT_KEYS = {
 
 def parse_server_menu(text: str) -> dict:
     info: dict = {}
+    opentw = re.search(r"Server type:\s*(OpenTW\s+[^\s]+)", text, re.IGNORECASE)
+    if opentw:
+        info["type"] = "opentw"
+        info["server_software"] = "OpenTW"
+        info["tradewars_version"] = canonical_product_name(opentw.group(1))
+        info["registered_to"] = "OpenTW"
     version = re.search(r"TWGS\s+v?([0-9][^\s]*)", text, re.IGNORECASE)
-    if version:
+    if version and "tradewars_version" not in info:
         info["tradewars_version"] = f"TWGS {version.group(1)}"
     registered = re.search(r"Server registered to\s+(.+)", text, re.IGNORECASE)
     if registered:
@@ -321,7 +327,13 @@ def parse_xml_server(server_node: ET.Element | None) -> dict:
     major = child_text(server_node, "ServerMajorVersion")
     minor = child_text(server_node, "ServerMinorVersion")
     if major and minor:
-        info["tradewars_version"] = f"TWGS {major}.{minor}"
+        if host.casefold() == "opentw":
+            info["type"] = "opentw"
+            info["server_software"] = "OpenTW"
+            info["gameop"] = "Kairos Bridger"
+            info["tradewars_version"] = f"OpenTW {major}.{minor}"
+        else:
+            info["tradewars_version"] = f"TWGS {major}.{minor}"
     info["server_local_time"] = child_text(server_node, "ServerLocalTime")
     info["server_local_time_zone"] = child_text(server_node, "ServerLocalTimeZone")
     return {key: value for key, value in info.items() if value not in {None, ""}}
@@ -404,6 +416,13 @@ def child_text(node: ET.Element | None, path: str) -> str:
         return ""
     child = node.find(path)
     return (child.text or "").strip() if child is not None and child.text else ""
+
+
+def canonical_product_name(value: str) -> str:
+    match = re.match(r"\s*opentw\b(.*)", value, re.IGNORECASE)
+    if match:
+        return f"OpenTW{match.group(1)}".strip()
+    return value.strip()
 
 
 def parse_high_scores(text: str) -> dict:

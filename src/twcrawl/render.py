@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .api import relevant_game, write_static_api
 from .parser import clean_menu_game_name
+from .server_meta import server_display_gameop, server_display_type, server_display_version
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,21 +46,22 @@ def copy_assets(out_dir: Path) -> None:
 
 
 def render_index(data: dict) -> str:
-    servers = data.get("servers", [])
+    servers = sorted(data.get("servers", []), key=lambda server: sort_text(server.get("name")))
     rows = []
     for server in servers:
+        version = server_display_version(server)
         rows.append(
             "<tr "
             f"data-status='{status_sort_value(server)}' "
             f"data-name='{attr(sort_text(server.get('name')))}' "
             f"data-bigbang='{attr(sort_date(server.get('last_bigbang')))}' "
-            f"data-version='{attr(sort_text(server.get('tradewars_version')))}' "
+            f"data-version='{attr(sort_text(version))}' "
             f"data-games='{attr(sort_number(server.get('game_count')))}' "
             f"data-players='{attr(sort_number(server.get('players')))}'>"
             f"<td class='status-dot'>{led(server)}</td>"
             f"<td><a class='serverlink' href='{server_filename(server)}'>{esc(server.get('name'))}</a></td>"
             f"<td>{esc(server.get('last_bigbang'))}</td>"
-            f"<td>{esc(server.get('tradewars_version'))}</td>"
+            f"<td>{esc(version)}</td>"
             f"<td class='num'>{esc(server.get('game_count'))}</td>"
             f"<td class='num'>{esc(server.get('players'))}</td>"
             "</tr>"
@@ -107,9 +109,9 @@ def render_server(data: dict, server: dict) -> str:
   <tr><td>Last Update :</td><td>{esc(format_timestamp(server.get('last_crawled_at')))}</td><td>Registered To :</td><td>{esc(server.get('registered_to') or server.get('name'))}</td></tr>
   <tr><td>Telnet :</td><td>{esc(server.get('telnet'))}</td><td>Location :</td><td>{esc(server.get('location', ''))}</td></tr>
   <tr><td>Website :</td><td>{esc(server.get('website', '[Unknown]'))}</td><td>Ventrilo :</td><td>[Unknown]</td></tr>
-  <tr><td>GameOP :</td><td>{esc(server.get('gameop', ''))}</td><td>BBS :</td><td>{esc(server.get('bbs'))}</td></tr>
-  <tr><td>Type :</td><td>{esc(server.get('type', 'twgs2')).upper()}</td><td>Games :</td><td>{esc(server.get('game_count'))}</td></tr>
-  <tr><td>Version :</td><td>{esc(server.get('tradewars_version'))}</td><td>Players :</td><td>{esc(server.get('players'))}</td></tr>
+  <tr><td>GameOP :</td><td>{esc(server_display_gameop(server))}</td><td>BBS :</td><td>{esc(server.get('bbs'))}</td></tr>
+  <tr><td>Type :</td><td>{esc(server_display_type(server))}</td><td>Games :</td><td>{esc(server.get('game_count'))}</td></tr>
+  <tr><td>Version :</td><td>{esc(server_display_version(server))}</td><td>Players :</td><td>{esc(server.get('players'))}</td></tr>
 </table>
 <p class="note">* = Days Since Start. Live values are generated from TWGS <code>*</code> game stats.</p>
 <table class="grid games">
@@ -556,10 +558,10 @@ def long_game_version(stats: dict[str, str], game: dict) -> str:
 
 
 def host_type(server: dict) -> str:
-    server_type = str(server.get("type") or "").lower()
-    if server_type == "twgs2":
+    server_type = server_display_type(server)
+    if server_type == "TWGS2":
         return "TWGS v2"
-    return str(server.get("tradewars_version") or server.get("type") or "")
+    return server_type or server_display_version(server)
 
 
 def active_of_max(stats: dict[str, str], active_key: str, max_key: str) -> str:

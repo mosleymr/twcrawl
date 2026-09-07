@@ -15,6 +15,7 @@ from .parser import (
     parse_server_menu,
     parse_twgs_xml,
 )
+from .server_meta import normalize_server_metadata
 from .telnet import TelnetError, TelnetSession
 
 
@@ -256,6 +257,7 @@ def crawl_server(
         xml_games = xml_info.pop("xml_games", [])
         if xml_info:
             merge_server_info(server_info, xml_info)
+        apply_server_metadata(server, server_info)
         if xml_games:
             games = merge_game_lists(xml_games, games)
         else:
@@ -332,6 +334,7 @@ def crawl_server(
     server_info["last_bigbang"] = latest_bigbang(crawled_games)
     server_info["last_crawled_at"] = crawl_time.isoformat()
     server_info["crawl_transcript"] = menu[0:0]
+    normalize_server_metadata(server_info)
     return server_info
 
 
@@ -355,6 +358,14 @@ def merge_server_info(server_info: dict, xml_info: dict) -> None:
         if key == "tradewars_version" and server_info.get(key):
             continue
         server_info[key] = value
+
+
+def apply_server_metadata(seed_server: dict, server_info: dict) -> None:
+    combined = {**seed_server, **server_info}
+    normalize_server_metadata(combined)
+    for key in ("type", "server_software", "tradewars_version", "gameop"):
+        if combined.get(key):
+            server_info[key] = combined[key]
 
 
 def wait_for_twgs_xml(telnet: TelnetSession, *, since: int, timeout: float) -> str:
