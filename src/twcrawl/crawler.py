@@ -381,16 +381,17 @@ def wait_for_twgs_xml(telnet: TelnetSession, *, since: int, timeout: float) -> s
 
 
 def merge_game_lists(primary: list[dict], fallback: list[dict]) -> list[dict]:
+    fallback_by_letter = {
+        str(game.get("letter") or "").upper(): game
+        for game in fallback
+        if str(game.get("letter") or "")
+    }
     games_by_letter: dict[str, dict] = {}
-    for game in fallback:
-        letter = str(game.get("letter") or "").upper()
-        if letter:
-            games_by_letter[letter] = {**game}
     for game in primary:
         letter = str(game.get("letter") or "").upper()
         if not letter:
             continue
-        merged = {**games_by_letter.get(letter, {}), **game}
+        merged = {**fallback_by_letter.get(letter, {}), **game}
         games_by_letter[letter] = merged
     return [games_by_letter[letter] for letter in sorted(games_by_letter)]
 

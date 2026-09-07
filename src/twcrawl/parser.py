@@ -8,6 +8,7 @@ from datetime import datetime
 
 ANGLE_MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
 DOT_MENU_GAME_RE = re.compile(r"(?:^|\s)([A-Z])\.\s+([^<\n\r]*?)(?=[A-Z]\.\s+|\s+[A-Z]\.\s+|\n|$)", re.MULTILINE)
+DASH_MENU_GAME_RE = re.compile(r"(?:^|[│\n\r])\s*([A-Z])\s+-\s+([^│\n\r]*?)(?=\s*│|\n|$)", re.MULTILINE)
 DESCRIPTION_TITLE_RE = re.compile(r"^[ \t]*([A-Z])[ \t]{2,}(.+?)[ \t]*$", re.MULTILINE)
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 LINE_ART_RE = re.compile(r"[╔╗╚╝╠╣╦╩╬═║▐▌▄▀█▓▒░■□▪▬▔▁▂▃▅▆▇·].*")
@@ -160,12 +161,17 @@ def parse_server_menu(text: str) -> dict:
     if supports:
         info["supports_games"] = int(supports.group(1))
         info["nodes"] = int(supports.group(2))
+    sysop = re.search(r"\bSysOp:\s*([^│\n\r]+)", text, re.IGNORECASE)
+    if sysop:
+        info["gameop"] = sysop.group(1).strip()
 
     games = []
     seen: set[str] = set()
     for match in ANGLE_MENU_GAME_RE.finditer(text):
         add_menu_game(games, seen, match.group(1), match.group(2))
     for match in DOT_MENU_GAME_RE.finditer(text):
+        add_menu_game(games, seen, match.group(1), match.group(2))
+    for match in DASH_MENU_GAME_RE.finditer(text):
         add_menu_game(games, seen, match.group(1), match.group(2))
     info["menu_games"] = games
     return info
@@ -189,6 +195,7 @@ def clean_menu_game_name(value: str) -> str:
     value = LINE_ART_RE.sub("", value)
     value = value.strip()
     value = re.split(r"\s{2,}", value, maxsplit=1)[0]
+    value = re.sub(r"\s+\((?:open|closed|coming soon)[^)]*\)\s*$", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+\[[^\]]+\]\s*$", "", value)
     value = value.rstrip(" ·")
     return " ".join(value.split())

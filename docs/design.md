@@ -123,8 +123,8 @@ static site/API.
 7. Send `$` and, if a complete `<TWGSData>` document is returned, parse it as
    the authoritative game list and configuration source. This captures configured
    games that may be omitted from the visible menu, including closed games.
-8. Parse game entries from the server menu, including both `<A> Game Name`
-   and customized `A. Game Name` formats. Adjacent entries such as
+8. Parse game entries from the server menu, including `<A> Game Name`,
+   customized `A. Game Name`, and boxed `A - Game Name` formats. Adjacent entries such as
    `A. First GameB. Second Game` are supported. Ignore non-game commands such
    as `<Q>`. This menu list is the fallback when `$` XML is unavailable.
 9. For each game:
