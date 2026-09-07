@@ -19,7 +19,11 @@ from .server_meta import normalize_server_metadata
 from .telnet import TelnetError, TelnetSession
 
 
-SERVER_MENU_PROMPT_RE = re.compile(r"[:?]\s")
+SERVER_MENU_PROMPT_RE = re.compile(r"[:?]\s*$")
+SERVER_MENU_LABEL_PROMPT_RE = re.compile(
+    r"(?:selection|select|command|your\s+command)[^\r\n]*[:?]\s*$",
+    re.IGNORECASE,
+)
 SERVER_MENU_QUIET_SECONDS = 1.5
 DESCRIPTION_MENU_PROMPT_RE = re.compile(
     r"(?:Select\s+game|Describe\s+which\s+game).*[:?]\s*$",
@@ -370,11 +374,21 @@ def apply_server_metadata(seed_server: dict, server_info: dict) -> None:
 
 def wait_for_twgs_xml(telnet: TelnetSession, *, since: int, timeout: float) -> str:
     deadline = time.monotonic() + timeout
+    last_change = time.monotonic()
+    last_length = len(telnet.text)
     while time.monotonic() < deadline:
         window = telnet.text[since:]
+        current_length = len(telnet.text)
+        if current_length != last_length:
+            last_length = current_length
+            last_change = time.monotonic()
         if TWGS_XML_END in window:
             return window
-        if window.strip() and "<TWGSData>" not in window and SERVER_MENU_PROMPT_RE.search(window):
+        if (
+            window.strip()
+            and "<TWGSData>" not in window
+            and server_menu_prompt_ready(window, time.monotonic() - last_change)
+        ):
             return window
         telnet.read_available(0.25)
     raise TelnetError(f"timed out waiting for TWGS XML from {telnet.host}:{telnet.port}")
@@ -440,14 +454,16 @@ def wait_for_server_menu(
             if reject_description_menu and DESCRIPTION_CONTEXT_RE.search(window):
                 telnet.read_available(0.15)
                 continue
-            if SERVER_MENU_PROMPT_RE.search(window):
+            quiet_elapsed = time.monotonic() - last_change
+            if server_menu_prompt_ready(window, quiet_elapsed):
                 return window, last_info
-            if time.monotonic() - last_change >= SERVER_MENU_QUIET_SECONDS:
+            if quiet_elapsed >= SERVER_MENU_QUIET_SECONDS:
                 return window, last_info
         if last_info.get("no_active_games"):
-            if SERVER_MENU_PROMPT_RE.search(window):
+            quiet_elapsed = time.monotonic() - last_change
+            if server_menu_prompt_ready(window, quiet_elapsed):
                 return window, last_info
-            if time.monotonic() - last_change >= SERVER_MENU_QUIET_SECONDS:
+            if quiet_elapsed >= SERVER_MENU_QUIET_SECONDS:
                 return window, last_info
         telnet.read_available(0.15)
     raise TelnetError(
@@ -501,7 +517,18 @@ def description_menu_is_server_menu(text: str, games: list[dict]) -> bool:
         return False
     if re.search(r"Selection\s*\(\?\s*for\s*menu\)\s*:\s*$", text, re.IGNORECASE | re.MULTILINE):
         return True
-    return bool(SERVER_MENU_PROMPT_RE.search(text) and "<!>" in text)
+    return bool(server_menu_prompt_ready(text, SERVER_MENU_QUIET_SECONDS) and "<!>" in text)
+
+
+def server_menu_prompt_ready(text: str, quiet_elapsed: float) -> bool:
+    tail = text[-500:].rstrip("\x00")
+    lines = tail.splitlines()
+    last_line = lines[-1] if lines else tail
+    if SERVER_MENU_LABEL_PROMPT_RE.search(last_line):
+        return True
+    if SERVER_MENU_PROMPT_RE.search(last_line):
+        return quiet_elapsed >= SERVER_MENU_QUIET_SECONDS
+    return False
 
 
 def wait_for_description_menu(telnet: TelnetSession, *, since: int, timeout: float) -> str:
