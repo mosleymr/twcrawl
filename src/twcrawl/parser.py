@@ -9,6 +9,8 @@ from datetime import datetime
 ANGLE_MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
 DOT_MENU_GAME_RE = re.compile(r"(?:^|\s)([A-Z])\.\s+([^<\n\r]*?)(?=[A-Z]\.\s+|\s+[A-Z]\.\s+|\n|$)", re.MULTILINE)
 DASH_MENU_GAME_RE = re.compile(r"(?:^|[│\n\r])\s*([A-Z])\s+-\s+([^│\n\r]*?)(?=\s*│|\n|$)", re.MULTILINE)
+SQUARE_MENU_GAME_RE = re.compile(r"(?:^|\s)\[([A-Z#!])\]\s+([^\[\]\n\r│]*?)(?=\s+\[[A-Z#!]\]|\s*│|\n|$)", re.MULTILINE)
+BULLET_MENU_GAME_RE = re.compile(r"([A-Z#!Q])·\s*([^\n\r]*?)(?=[A-Z#!Q]·|\n|$)")
 DESCRIPTION_TITLE_RE = re.compile(r"^[ \t]*([A-Z])[ \t]{2,}(.+?)[ \t]*$", re.MULTILINE)
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 LINE_ART_RE = re.compile(r"[╔╗╚╝╠╣╦╩╬═║▐▌▄▀█▓▒░■□▪▬▔▁▂▃▅▆▇·].*")
@@ -164,6 +166,8 @@ def parse_server_menu(text: str) -> dict:
     sysop = re.search(r"\bSysOp:\s*([^│\n\r]+)", text, re.IGNORECASE)
     if sysop:
         info["gameop"] = sysop.group(1).strip()
+    if re.search(r"\bNo games active or pending\b", text, re.IGNORECASE):
+        info["no_active_games"] = True
 
     games = []
     seen: set[str] = set()
@@ -173,12 +177,18 @@ def parse_server_menu(text: str) -> dict:
         add_menu_game(games, seen, match.group(1), match.group(2))
     for match in DASH_MENU_GAME_RE.finditer(text):
         add_menu_game(games, seen, match.group(1), match.group(2))
+    for match in SQUARE_MENU_GAME_RE.finditer(text):
+        add_menu_game(games, seen, match.group(1), match.group(2))
+    for match in BULLET_MENU_GAME_RE.finditer(text):
+        add_menu_game(games, seen, match.group(1), match.group(2))
     info["menu_games"] = games
     return info
 
 
 def add_menu_game(games: list[dict], seen: set[str], letter: str, raw_name: str) -> None:
     letter = letter.upper()
+    if not re.fullmatch(r"[A-Z]", letter):
+        return
     if letter == "Q":
         return
     if letter in seen:

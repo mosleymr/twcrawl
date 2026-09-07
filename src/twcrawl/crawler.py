@@ -392,8 +392,17 @@ def merge_game_lists(primary: list[dict], fallback: list[dict]) -> list[dict]:
         if not letter:
             continue
         merged = {**fallback_by_letter.get(letter, {}), **game}
+        fallback_name = fallback_by_letter.get(letter, {}).get("name")
+        if fallback_name and is_generic_game_name(str(game.get("name") or ""), letter):
+            merged["xml_name"] = game.get("name")
+            merged["name"] = fallback_name
+            merged["name_source"] = "menu"
         games_by_letter[letter] = merged
     return [games_by_letter[letter] for letter in sorted(games_by_letter)]
+
+
+def is_generic_game_name(name: str, letter: str) -> bool:
+    return bool(re.fullmatch(rf"(?i)game\s+{re.escape(letter)}", name.strip()))
 
 
 def should_enter_game(game: dict) -> bool:
@@ -431,6 +440,11 @@ def wait_for_server_menu(
             if reject_description_menu and DESCRIPTION_CONTEXT_RE.search(window):
                 telnet.read_available(0.15)
                 continue
+            if SERVER_MENU_PROMPT_RE.search(window):
+                return window, last_info
+            if time.monotonic() - last_change >= SERVER_MENU_QUIET_SECONDS:
+                return window, last_info
+        if last_info.get("no_active_games"):
             if SERVER_MENU_PROMPT_RE.search(window):
                 return window, last_info
             if time.monotonic() - last_change >= SERVER_MENU_QUIET_SECONDS:

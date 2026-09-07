@@ -114,19 +114,24 @@ static site/API.
    - Unsupported options are refused.
 4. Wait for `Please enter your name`.
 5. Send `twcrawl`.
-6. Wait until the server menu contains parseable `<A> Game Name` entries and
-   any menu prompt ending in `: ` or `? `. This handles both normal TWGS
+6. Wait until the server menu contains parseable game entries and any menu
+   prompt ending in `: ` or `? `. This handles both normal TWGS
    `Selection (? for menu):` menus and customized menus such as
    `Select a game :`. If a customized ANSI menu displays game letters and then
    waits for input without printing any prompt, treat the menu as ready after
-   output goes quiet briefly.
+   output goes quiet briefly. If the server explicitly reports `No games active
+   or pending`, treat that as a valid empty menu so the server can still be
+   recorded as online.
 7. Send `$` and, if a complete `<TWGSData>` document is returned, parse it as
    the authoritative game list and configuration source. This captures configured
    games that may be omitted from the visible menu, including closed games.
 8. Parse game entries from the server menu, including `<A> Game Name`,
-   customized `A. Game Name`, and boxed `A - Game Name` formats. Adjacent entries such as
+   customized `A. Game Name`, boxed `A - Game Name`, `[A] Game Name`, and
+   CP437 bullet-separated `A· Game Name` formats. Adjacent entries such as
    `A. First GameB. Second Game` are supported. Ignore non-game commands such
-   as `<Q>`. This menu list is the fallback when `$` XML is unavailable.
+   as `<Q>`, `<#>`, and `<!>`. This menu list is the fallback when `$` XML is
+   unavailable and can also provide display names when `$` XML only returns
+   generic placeholders such as `Game A`.
 9. For each game:
    - Skip entry for XML games marked closed or without multiplayer access, but
      keep the XML-derived row in the data and generated pages.
