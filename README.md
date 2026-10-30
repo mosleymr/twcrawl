@@ -199,6 +199,12 @@ plus currently logged-in players from the live `#` check.
 
 ## REST/API output
 
+For a database-backed API behind Apache, see [Stored API and Crawl History](docs/stored-api.md).
+Every crawl now archives a complete snapshot and change report in SQLite.
+`twcrawl serve --api-only` serves the latest committed records, including
+`.json` compatibility routes, searches, sampled online users, and history.
+API reads never connect to game servers and do not require `twcrawl build`.
+
 `twcrawl build` also writes static JSON API files under `public/api/`, so the
 same Apache site that serves the HTML pages can serve crawler data over HTTPS
 without running a separate Python process.
@@ -233,8 +239,8 @@ matching player `slug`, then fetch `/api/players/{player_slug}/games.json`.
 These player lookup files are generated for API clients but are not linked from
 the public pages.
 
-For local development, `twcrawl serve` also provides live extensionless REST
-routes that reload `data/twcrawl.json` on each request:
+`twcrawl serve` provides extensionless and `.json` REST routes that read the
+latest committed `data/twcrawl.sqlite3` snapshot on each request:
 
 ```text
 /api
@@ -249,6 +255,10 @@ routes that reload `data/twcrawl.json` on each request:
 /api/players
 /api/players/{player_slug_or_name}
 /api/players/{player_slug_or_name}/games
+/api/online?player=Freejack
+/api/reports/latest
+/api/runs
+/api/runs/{run_id}
 ```
 
 List endpoints accept `full=1`; `/api/games` and `/api/configurations` also

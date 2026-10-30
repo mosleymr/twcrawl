@@ -456,7 +456,6 @@ def extract_high_scores_block(text: str) -> str:
     end_candidates = [
         position
         for position in (
-            text.find("[Pause]", rankings_start),
             text.find("==-- Trade Wars 2002 --==", rankings_start),
             text.find("Enter your choice:", rankings_start),
         )
@@ -477,8 +476,8 @@ def parse_high_score_rows(text: str) -> list[dict]:
         if not in_rows:
             continue
         if not line.strip():
-            if rows:
-                break
+            continue
+        if line.lstrip().startswith("[Pause]"):
             continue
         if line.lstrip().startswith("["):
             break

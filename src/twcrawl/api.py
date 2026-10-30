@@ -1,22 +1,59 @@
 from __future__ import annotations
 
-import json
 import re
 import shutil
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from .parser import clean_menu_game_name
 from .server_meta import server_display_gameop, server_display_type, server_display_version
+from .storage import atomic_json, read_runs, stored_activity
 
 
-def api_response(data: dict, path: str, query: str = "") -> tuple[int, dict]:
-    parts = [part for part in path.strip("/").split("/") if part]
+def api_response(data: dict, path: str, query: str = "", *, database: Path | None = None) -> tuple[int, dict]:
+    parts = [unquote(part) for part in path.strip("/").split("/") if part]
+    if parts and parts[-1].endswith(".json"):
+        parts[-1] = parts[-1][:-5]
+    if parts and parts[-1] == "index":
+        parts.pop()
     params = parse_qs(query, keep_blank_values=True)
     if parts == ["api"]:
         return 200, api_index(data)
     if parts == ["api", "health"]:
-        return 200, {"ok": True, "generated_at": data.get("generated_at"), "server_count": len(data.get("servers") or [])}
+        return 200, {"ok": True, "generated_at": data.get("generated_at"), "run_id": data.get("run_id"),
+                     "server_count": len(data.get("servers") or []), "storage": "sqlite" if database else "json"}
+    if parts in (["api", "activity"], ["api", "online"]):
+        activity = stored_activity(data)
+        server_filter = first(params, "server")
+        allowed = {s.get("telnet") for s in data.get("servers", []) if not server_filter or server_matches(s, server_filter)}
+        activity["server_checks"] = [r for r in activity["server_checks"] if r.get("server_telnet") in allowed]
+        activity["online_sessions"] = [r for r in activity["online_sessions"] if r.get("server_telnet") in allowed
+            and first(params, "player").casefold() in r.get("player", "").casefold()
+            and (not first(params, "letter") or first(params, "letter").casefold() == str(r.get("letter") or "").casefold())]
+        activity["session_count"] = len(activity["online_sessions"])
+        activity["player_count"] = len({r["player"].casefold() for r in activity["online_sessions"]})
+        return 200, activity
+    if parts == ["api", "reports", "latest"]:
+        return (200, data["latest_report"]) if data.get("latest_report") else (404, {"error": "no archived report yet"})
+    if parts == ["api", "runs"]:
+        try:
+            limit = int(first(params, "limit") or 50)
+            before = int(first(params, "before")) if first(params, "before") else None
+        except ValueError:
+            return 400, {"error": "limit and before must be integers"}
+        runs = read_runs(database, limit=limit, before=before) if database else []
+        return 200, {"runs": runs, "next_before": runs[-1]["id"] if runs else None}
+    if len(parts) in (3, 4) and parts[:2] == ["api", "runs"]:
+        if len(parts) == 4 and parts[3] != "report":
+            return 404, {"error": "not found"}
+        try:
+            run_id = int(parts[2])
+        except ValueError:
+            return 400, {"error": "run id must be an integer"}
+        runs = read_runs(database, run_id=run_id) if database else []
+        if not runs:
+            return 404, {"error": "run not found"}
+        return 200, runs[0]["report"] if len(parts) == 4 else runs[0]
     if parts == ["api", "data"]:
         return 200, data
     if parts == ["api", "servers"]:
@@ -35,7 +72,12 @@ def api_response(data: dict, path: str, query: str = "") -> tuple[int, dict]:
                 return 404, {"error": "game not found", "server": parts[2], "game": parts[4]}
             return 200, game_payload(server, game, full=True)
     if parts == ["api", "games"]:
-        return 200, {"games": all_games(data, params)}
+        games = all_games(data, params)
+        query_text = first(params, "q") or first(params, "edit")
+        if query_text:
+            from .search import game_matches_query
+            games = [g for g in games if game_matches_query(g, query_text)]
+        return 200, {"generated_at": data.get("generated_at"), "games": games}
     if parts == ["api", "configurations"]:
         return 200, {"configurations": all_configurations(data, params)}
     if parts == ["api", "players"]:
@@ -64,6 +106,10 @@ def write_static_api(data: dict, out_dir: Path) -> None:
     write_json(api_dir / "games.json", api_response(data, "/api/games")[1])
     write_json(api_dir / "configurations.json", api_response(data, "/api/configurations")[1])
     write_json(api_dir / "players.json", api_response(data, "/api/players")[1])
+    write_json(api_dir / "activity.json", stored_activity(data))
+    write_json(api_dir / "online.json", stored_activity(data))
+    if data.get("latest_report"):
+        write_json(api_dir / "reports" / "latest.json", data["latest_report"])
 
     servers_dir = api_dir / "servers"
     servers_dir.mkdir(parents=True, exist_ok=True)
@@ -92,8 +138,7 @@ def write_static_api(data: dict, out_dir: Path) -> None:
 
 
 def write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_json(path, payload)
 
 
 def server_api_key(server: dict) -> str:
@@ -105,6 +150,12 @@ def api_index(data: dict) -> dict:
         "name": "twcrawl API",
         "generated_at": data.get("generated_at"),
         "endpoints": [
+            "/api/activity",
+            "/api/online?player={name}",
+            "/api/reports/latest",
+            "/api/runs?limit=50&before={run_id}",
+            "/api/runs/{run_id}",
+            "/api/runs/{run_id}/report",
             "/api/index.json",
             "/api/health.json",
             "/api/data.json",
@@ -134,7 +185,9 @@ def api_index(data: dict) -> dict:
             "status": "Filter servers or games by status, such as online or ok.",
             "server": "Filter /api/games or /api/configurations by server id, slug, or name substring.",
             "player": "Filter /api/games or /api/configurations by active player name substring.",
+            "q": "Search /api/games by game/edit name or configuration; edit= is an alias.",
         },
+        "reads": "Stored records only; API requests never connect to game servers.",
         "server_count": len(data.get("servers") or []),
         "game_count": len(all_games(data, {})),
     }
@@ -187,7 +240,7 @@ def all_games(data: dict, params: dict[str, list[str]]) -> list[dict]:
         for game in filtered_games(server, params):
             if player_filter and not game_has_player(game, player_filter):
                 continue
-            games.append(game_payload(server, game, full=full(params)))
+            games.append(game_payload(server, game, full=full(params) or bool(first(params, "q") or first(params, "edit"))))
     return games
 
 
@@ -325,6 +378,9 @@ def server_payload(server: dict, *, full: bool = False) -> dict:
         "status",
         "type",
         "last_crawled_at",
+        "last_success_at",
+        "crawl_complete",
+        "online_check",
         "last_bigbang",
         "tradewars_version",
         "gameop",
@@ -363,6 +419,13 @@ def game_payload(server: dict, game: dict, *, full: bool = False) -> dict:
         "ship_delay": (game.get("stats") or {}).get("Ship Delay"),
         "high_score_count": len(game.get("high_scores") or []),
         "active_player_names": [row.get("name") for row in game.get("high_scores") or [] if row.get("name")],
+        "high_scores_checked_at": game.get("high_scores_checked_at"),
+        "last_crawled_at": server.get("last_crawled_at"),
+        "last_success_at": server.get("last_success_at"),
+        "online_checked_at": (server.get("online_check") or {}).get("checked_at"),
+        "online_status": (server.get("online_check") or {}).get("status", "unknown"),
+        "online_players": [row for row in (server.get("online_check") or {}).get("players", [])
+                           if str(row.get("letter") or "").casefold() == str(game.get("letter") or "").casefold()],
     }
     if full:
         if game_name(game) != str(game.get("name") or ""):

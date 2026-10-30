@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import http.server
+import copy
 import json
-import socketserver
 from pathlib import Path
-from urllib.parse import urlparse
 
-from .api import api_response
 from .crawler import add_server, crawl_servers, load_json, load_or_seed, save_json
 from .history import snapshot_data
 from .importer import DEFAULT_ARCHIVE_URL, write_seed
@@ -15,6 +12,7 @@ from .mtc_monitor import DEFAULT_MTC_GAMES_DIR, dumps_monitor_report, format_mon
 from .online import check_player_online, dumps_online_report, format_online_report
 from .render import build_site
 from .search import dumps_search_results, format_search_results, search_games
+from .storage import archive_data, latest_run, read_runs
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,11 +77,20 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
     build.add_argument("--out", type=Path, default=DEFAULT_PUBLIC)
 
-    serve_parser = sub.add_parser("serve", help="serve generated static pages")
+    serve_parser = sub.add_parser("serve", help="serve the SQLite-backed API and optional static pages")
     serve_parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     serve_parser.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
     serve_parser.add_argument("--out", type=Path, default=DEFAULT_PUBLIC)
     serve_parser.add_argument("--port", type=int, default=8008)
+    serve_parser.add_argument("--host", default="127.0.0.1", help="bind address; keep loopback behind Apache")
+    serve_parser.add_argument("--api-only", action="store_true", help="serve only the stored-data API")
+
+    archive = sub.add_parser("archive", help="import existing crawl JSON into SQLite without crawling")
+    archive.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    archive.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
+    report = sub.add_parser("report", help="print a stored crawl report without connecting to game servers")
+    report.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    report.add_argument("--run", type=int, help="historical run ID; latest by default")
 
     online = sub.add_parser("online", help="check whether a known player is currently logged in")
     online.add_argument("player", help="player name or generated player slug")
@@ -118,7 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     monitor.add_argument("--no-save", action="store_true", help="do not update monitor state after reporting")
     monitor.add_argument("--json", action="store_true", help="write machine-readable JSON")
 
+    for command in (crawl, daily, add, serve_parser, archive, report):
+        command.add_argument("--database", type=Path, help="SQLite archive path; defaults beside --data as twcrawl.sqlite3")
     args = parser.parse_args(argv)
+    if hasattr(args, "database"):
+        args.database = args.database or args.data.with_suffix(".sqlite3")
     if args.command == "init-seeds":
         try:
             data = write_seed(args.out, args.url, overwrite=args.force)
@@ -140,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{seed_action} {seed_server['name']} {seed_server['telnet']} in {args.seeds}")
 
         if args.crawl:
+            before = copy.deepcopy(data)
             data = crawl_servers(
                 data,
                 only=str(server.get("server_id") or server.get("slug") or server.get("name")),
@@ -149,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 connect_timeout=args.connect_timeout,
                 game_timeout=args.game_timeout,
             )
+            data = archive_data(data, args.database, baseline=before)
             save_json(args.data, data)
             print(f"wrote {args.data}")
 
@@ -162,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.all and not args.only and not args.missing and args.limit is None:
             raise SystemExit("use --all, --only, --missing, or --limit so a crawl is intentional")
         data = load_or_seed(args.data, args.seeds)
+        before = copy.deepcopy(data)
         data = crawl_servers(
             data,
             only=args.only,
@@ -171,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
             connect_timeout=args.connect_timeout,
             game_timeout=args.game_timeout,
         )
+        data = archive_data(data, args.database, baseline=before)
         save_json(args.data, data)
         print(f"wrote {args.data}")
         if args.build:
@@ -179,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "daily":
         data = load_or_seed(args.data, args.seeds)
+        before = copy.deepcopy(data)
         data = crawl_servers(
             data,
             only=args.only,
@@ -188,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             connect_timeout=args.connect_timeout,
             game_timeout=args.game_timeout,
         )
+        data = archive_data(data, args.database, kind="daily", baseline=before)
         save_json(args.data, data)
         print(f"wrote {args.data}")
         if not args.no_build:
@@ -202,7 +219,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"built {args.out}")
         return 0
     if args.command == "serve":
-        return serve_site(args.out, args.port, args.data, args.seeds)
+        from .server import serve
+        if latest_run(args.database) is None:
+            if not args.data.exists():
+                raise SystemExit("no crawl data; run twcrawl crawl or archive first")
+            archive_data(load_json(args.data), args.database, kind="import")
+        return serve(args.database, args.out, host=args.host, port=args.port, api_only=args.api_only)
+    if args.command == "archive":
+        if not args.data.exists():
+            raise SystemExit(f"crawl data does not exist: {args.data}")
+        data = archive_data(load_json(args.data), args.database, kind="import")
+        save_json(args.data, data)
+        print(f"archived run {data['run_id']} in {args.database}")
+        return 0
+    if args.command == "report":
+        if args.run is not None:
+            rows = read_runs(args.database, run_id=args.run)
+            payload = rows[0]["report"] if rows else None
+        else:
+            run = latest_run(args.database)
+            payload = run["data"].get("latest_report") if run else None
+        if payload is None:
+            raise SystemExit("no stored report found")
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     if args.command == "online":
         data = load_or_seed(args.data, args.seeds)
         result = check_player_online(
@@ -246,51 +286,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def serve_site(out: Path, port: int, data_path: Path, seed_path: Path) -> int:
-    class TwcrawlHandler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            super().__init__(*args, directory=str(out), **kwargs)
+    from .server import serve
 
-        def end_headers(self) -> None:
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            super().end_headers()
-
-        def do_OPTIONS(self) -> None:
-            self.send_response(204)
-            self.end_headers()
-
-        def do_GET(self) -> None:
-            parsed = urlparse(self.path)
-            if (parsed.path == "/api" or parsed.path.startswith("/api/")) and not parsed.path.endswith(".json"):
-                self.serve_api(parsed.path, parsed.query)
-                return
-            super().do_GET()
-
-        def serve_api(self, path: str, query: str) -> None:
-            try:
-                data = load_or_seed(data_path, seed_path)
-                status, payload = api_response(data, path, query)
-            except Exception as exc:
-                status = 500
-                payload = {"error": str(exc)}
-            body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-        allow_reuse_address = True
-        daemon_threads = True
-
-    with ReusableTCPServer(("127.0.0.1", port), TwcrawlHandler) as httpd:
-        print(f"serving http://127.0.0.1:{port}/ from {out}")
-        print(f"api http://127.0.0.1:{port}/api using {data_path}")
-        httpd.serve_forever()
-    return 0
+    database = data_path.with_suffix(".sqlite3")
+    if latest_run(database) is None:
+        archive_data(load_or_seed(data_path, seed_path), database, kind="import")
+    return serve(database, out, host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

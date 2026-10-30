@@ -47,6 +47,8 @@ class TelnetSession:
         self.state = "data"
         self.sb = bytearray()
         self.text = ""
+        self._escape = ""
+        self._last_cr = False
 
     def __enter__(self) -> "TelnetSession":
         self.connect()
@@ -204,10 +206,32 @@ class TelnetSession:
     def _send_iac(self, verb: int, opt: int) -> None:
         self.send_raw(bytes([IAC, verb, opt]))
 
-    @staticmethod
-    def _clean_text(text: str) -> str:
-        text = ANSI_RE.sub("", text)
-        text = text.replace("\x00", "")
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        return text
+    def _clean_text(self, text: str) -> str:
+        # Escape sequences and CRLF pairs may span separate TCP packets.
+        result = []
+        for char in text:
+            if self._escape:
+                self._escape += char
+                if self._escape == "\x1b[" or self._escape == "\x1b]":
+                    continue
+                if self._escape.startswith("\x1b["):
+                    if "@" <= char <= "~":
+                        self._escape = ""
+                elif self._escape.startswith("\x1b]"):
+                    if char == "\x07" or self._escape.endswith("\x1b\\"):
+                        self._escape = ""
+                else:
+                    self._escape = ""
+                continue
+            if char == "\x1b":
+                self._escape = char
+                continue
+            if char == "\x00":
+                continue
+            if char == "\n" and self._last_cr:
+                self._last_cr = False
+                continue
+            self._last_cr = char == "\r"
+            result.append("\n" if char == "\r" else char)
+        return "".join(result)
 

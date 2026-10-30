@@ -17,6 +17,7 @@ from .parser import (
 )
 from .server_meta import normalize_server_metadata
 from .telnet import TelnetError, TelnetSession
+from .storage import atomic_json
 
 
 SERVER_MENU_PROMPT_RE = re.compile(r"[:?]\s*$")
@@ -44,8 +45,7 @@ def load_json(path: Path) -> dict:
 
 
 def save_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_json(path, data)
 
 
 def load_or_seed(data_path: Path, seed_path: Path) -> dict:
@@ -183,19 +183,31 @@ def crawl_servers(
     for server in selected:
         print(f"crawl {server.get('name')} {server.get('telnet')}")
         try:
-            live = crawl_server(
-                server,
-                bot_name=bot_name,
-                connect_timeout=connect_timeout,
-                game_timeout=game_timeout,
-            )
+            for attempt in range(2):
+                try:
+                    live = crawl_server(
+                        server, bot_name=bot_name,
+                        connect_timeout=connect_timeout, game_timeout=game_timeout,
+                    )
+                    break
+                except (TelnetError, OSError):
+                    if attempt:
+                        raise
+                    print("  retry: reconnecting after an incomplete session")
+            for key in ("description_error", "twgs_xml"):
+                server.pop(key, None)
             server.update(live)
             server["status"] = "online"
             server.pop("error", None)
         except Exception as exc:
+            server.setdefault("last_success_at", server.get("last_crawled_at"))
             server["status"] = "error"
             server["error"] = str(exc)
             server["last_crawled_at"] = datetime.now(timezone.utc).isoformat()
+            server["online_check"] = {
+                "status": "error", "checked_at": server["last_crawled_at"],
+                "error": str(exc), "players": [],
+            }
             print(f"  error: {exc}")
     data["generated_at"] = datetime.now(timezone.utc).isoformat()
     summarize_servers(data)
@@ -228,6 +240,10 @@ def needs_current_data(server: dict) -> bool:
         return True
     if not server.get("last_crawled_at"):
         return True
+    if server.get("crawl_complete") is False:
+        return True
+    if (server.get("twgs_xml") or {}).get("game_count", 0) > len(games):
+        return True
     if not games:
         return True
     return any(not has_current_game_data(game) for game in games)
@@ -259,18 +275,29 @@ def crawl_server(
         games = server_info.pop("menu_games", [])
         xml_info = fetch_twgs_xml(telnet, crawl_time, timeout=max(game_timeout, 45.0))
         xml_games = xml_info.pop("xml_games", [])
+        if not xml_games and not xml_info and (server.get("twgs_xml") or {}).get("game_count"):
+            raise TelnetError("XML discovery failed on a previously XML-capable server; retaining prior games")
         if xml_info:
             merge_server_info(server_info, xml_info)
+        server_info["twgs_xml"] = xml_info.get("twgs_xml") if xml_info else None
         apply_server_metadata(server, server_info)
         if xml_games:
             games = merge_game_lists(xml_games, games)
         else:
-            games = enrich_game_names_from_descriptions(telnet, games, timeout=min(game_timeout, 15.0))
+            try:
+                games = enrich_game_names_from_descriptions(telnet, games, timeout=min(game_timeout, 15.0))
+            except TelnetError as exc:
+                server_info["description_error"] = str(exc)
+                if not recover_to_menu(telnet):
+                    raise
 
-        crawled_games: list[dict] = []
+        server_info["online_check"] = capture_online(telnet, games, timeout=min(game_timeout, 20.0), bot_name=bot_name)
+
+        # XML already contains valid game records, even if later H checks fail.
+        crawled_games = {game["letter"]: dict(game) for game in games}
+        server_info["crawl_complete"] = True
         for game in games:
             if not should_enter_game(game):
-                crawled_games.append(game)
                 continue
             game_start = len(telnet.text)
             telnet.send_line(game["letter"])
@@ -284,8 +311,10 @@ def crawl_server(
                 else:
                     game_result["status"] = "error"
                     game_result["error"] = str(exc)
-                crawled_games.append(game_result)
-                recover_to_menu(telnet)
+                crawled_games[game["letter"]] = game_result
+                server_info["crawl_complete"] = False
+                if not recover_to_menu(telnet):
+                    break
                 continue
 
             game_result = {**game}
@@ -295,13 +324,14 @@ def crawl_server(
                 stats_start = len(telnet.text)
                 telnet.send_line("*")
                 try:
-                    stats_text = telnet.wait_for("Enter your choice:", timeout=game_timeout, since=stats_start)
+                    stats_text = telnet.wait_for("Enter your choice:", timeout=game_timeout, since=stats_start, auto_pause=True)
                     parsed = parse_game_stats(stats_text, crawl_time)
                     game_result.update(parsed)
                     game_result["status"] = "ok"
                 except TelnetError as exc:
                     game_result["status"] = "error"
                     game_result["error"] = str(exc)
+                    server_info["crawl_complete"] = False
 
             high_scores_start = len(telnet.text)
             telnet.send_line("H")
@@ -313,18 +343,21 @@ def crawl_server(
                     auto_pause=True,
                 )
                 game_result.update(parse_high_scores(high_scores_text))
+                game_result["high_scores_checked_at"] = crawl_time.isoformat()
                 if game_result.get("stats"):
                     game_result["status"] = "ok"
             except TelnetError as exc:
                 game_result["high_scores_error"] = str(exc)
+                server_info["crawl_complete"] = False
 
-            crawled_games.append(game_result)
+            crawled_games[game["letter"]] = game_result
 
             exit_start = len(telnet.text)
             telnet.send_line("X")
             try:
                 wait_for_server_menu(telnet, since=exit_start, timeout=20.0)
             except TelnetError:
+                server_info["crawl_complete"] = False
                 break
 
         try:
@@ -332,27 +365,56 @@ def crawl_server(
         except Exception:
             pass
 
-    server_info["games"] = sorted(crawled_games, key=lambda g: g.get("letter", ""))
+    server_info["games"] = sorted(crawled_games.values(), key=lambda g: g.get("letter", ""))
     server_info["game_count"] = len(crawled_games)
-    server_info["players"] = max((g.get("players") or 0 for g in crawled_games), default=0)
-    server_info["last_bigbang"] = latest_bigbang(crawled_games)
+    server_info["players"] = max((g.get("players") or 0 for g in crawled_games.values()), default=0)
+    server_info["last_bigbang"] = latest_bigbang(list(crawled_games.values()))
     server_info["last_crawled_at"] = crawl_time.isoformat()
+    server_info["last_success_at"] = crawl_time.isoformat()
     server_info["crawl_transcript"] = menu[0:0]
     normalize_server_metadata(server_info)
     return server_info
 
 
 def fetch_twgs_xml(telnet: TelnetSession, crawl_time: datetime, *, timeout: float) -> dict:
-    xml_start = len(telnet.text)
-    telnet.send_line("$")
+    for _ in range(2):
+        # Drain the complete menu before sending $, including trailing ANSI art.
+        start = len(telnet.text)
+        telnet.send_line("?")
+        wait_for_server_menu(telnet, since=start, timeout=20.0)
+        xml_start = len(telnet.text)
+        telnet.send_line("$")
+        try:
+            text = wait_for_twgs_xml(telnet, since=xml_start, timeout=timeout)
+        except TelnetError:
+            continue
+        parsed = parse_twgs_xml(text, crawl_time)
+        if parsed:
+            # Closing XML is not the next input prompt. Consume that menu too.
+            menu_start = xml_start + text.index(TWGS_XML_END) + len(TWGS_XML_END)
+            wait_for_server_menu(telnet, since=menu_start, timeout=20.0, require_games=False)
+            return parsed
+    return {}
+
+
+def capture_online(telnet: TelnetSession, games: list[dict], *, timeout: float, bot_name: str = "twcrawl") -> dict:
+    from .online import match_online_game, parse_players_online, wait_for_players_online
+
+    checked_at = datetime.now(timezone.utc).isoformat()
     try:
-        text = wait_for_twgs_xml(telnet, since=xml_start, timeout=timeout)
-    except TelnetError:
-        return {}
-    parsed = parse_twgs_xml(text, crawl_time)
-    if not parsed:
-        return {}
-    return parsed
+        start = len(telnet.text)
+        telnet.send_line("#")
+        raw = wait_for_players_online(telnet, since=start, timeout=timeout)
+        rows = [row for row in parse_players_online(raw)
+                if not (row["player"].casefold() == bot_name.casefold() and row["location"].casefold() == "menu")]
+        for row in rows:
+            game = match_online_game(row, games)
+            row["letter"] = game.get("letter") if game else None
+        return {"status": "ok", "checked_at": checked_at, "players": rows, "raw": raw}
+    except (TelnetError, OSError) as exc:
+        if not recover_to_menu(telnet):
+            raise TelnetError(f"unable to recover after online check: {exc}") from exc
+        return {"status": "error", "checked_at": checked_at, "error": str(exc), "players": []}
 
 
 def merge_server_info(server_info: dict, xml_info: dict) -> None:
@@ -438,6 +500,7 @@ def wait_for_server_menu(
     since: int,
     timeout: float,
     reject_description_menu: bool = False,
+    require_games: bool = True,
 ) -> tuple[str, dict]:
     deadline = time.monotonic() + timeout
     last_change = time.monotonic()
@@ -450,8 +513,10 @@ def wait_for_server_menu(
             last_length = current_length
             last_change = time.monotonic()
         last_info = parse_server_menu(window)
+        if not require_games and server_menu_prompt_ready(window, time.monotonic() - last_change):
+            return window, last_info
         if last_info.get("menu_games"):
-            if reject_description_menu and DESCRIPTION_CONTEXT_RE.search(window):
+            if reject_description_menu and DESCRIPTION_MENU_PROMPT_RE.search(window.splitlines()[-1] if window.splitlines() else ""):
                 telnet.read_available(0.15)
                 continue
             quiet_elapsed = time.monotonic() - last_change
@@ -566,15 +631,16 @@ def return_to_server_menu_from_descriptions(telnet: TelnetSession, *, timeout: f
     raise TelnetError(f"timed out returning to server menu from game descriptions on {telnet.host}:{telnet.port}")
 
 
-def recover_to_menu(telnet: TelnetSession) -> None:
-    for command in ("X", "Q", ""):
+def recover_to_menu(telnet: TelnetSession) -> bool:
+    for command in ("X", "?", ""):
         start = len(telnet.text)
         telnet.send_line(command)
         try:
             wait_for_server_menu(telnet, since=start, timeout=8.0)
-            return
-        except TelnetError:
+            return True
+        except (TelnetError, OSError):
             continue
+    return False
 
 
 def summarize_servers(data: dict) -> None:
