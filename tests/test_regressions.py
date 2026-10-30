@@ -1,5 +1,6 @@
 import copy
 import json
+import importlib.util
 import tempfile
 import threading
 import unittest
@@ -211,6 +212,24 @@ class StorageTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join()
+
+
+class DeploymentTests(unittest.TestCase):
+    def test_proxy_is_added_only_to_the_named_virtual_host(self):
+        path = Path(__file__).resolve().parents[1] / "deploy" / "apache-setup.py"
+        spec = importlib.util.spec_from_file_location("apache_setup", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        other = "<VirtualHost *:443>\nServerName other.example\n</VirtualHost>\n"
+        source = other + "<VirtualHost *:443>\nServerName roguetw.net:443\nSSLEngine on\n</VirtualHost>\n"
+        result = module.add_include(source, "roguetw.net")
+        self.assertTrue(result.startswith(other))
+        self.assertEqual(result.count('Include "conf/extra/twcrawl-api.conf"'), 1)
+        self.assertEqual(module.add_include(result, "roguetw.net"), result)
+        with self.assertRaises(ValueError):
+            module.add_include(source, "absent.example")
+        self.assertEqual(module.enable_module("#LoadModule proxy_module modules/mod_proxy.so\n", "proxy_module"),
+                         "LoadModule proxy_module modules/mod_proxy.so\n")
 
 
 if __name__ == "__main__":

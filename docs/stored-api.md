@@ -50,6 +50,12 @@ and the option to skip starting a new instance while one is running. Configure
 the API to start at boot and restart on failure. Cygwin installations must use
 their Cygwin Python and paths, rather than mixing them with native Windows ones.
 
+For an existing Cygwin cron installation, `python3 deploy/cygwin-api.py --ensure`
+starts a detached loopback API with output in `data/logs/api.log`.
+`python3 deploy/cygwin-api.py --install-cron` backs up the current user's cron
+and adds boot startup plus a five-minute health watchdog without changing
+existing crawl jobs. This uses the existing account, not a new Windows service.
+
 ## Apache
 
 Keep the existing HTTPS certificate and `/games` static pages. Enable Apache's
@@ -57,6 +63,17 @@ Keep the existing HTTPS certificate and `/games` static pages. Enable Apache's
 inside the HTTPS virtual host. Place it before catch-all proxy/rewrite rules.
 Existing rewrite fallbacks must exclude `/api`. Test the Apache configuration
 before a graceful restart. No public Python port or firewall exception is needed.
+
+On the roguetw Apache layout, preview the exact backed-up configuration change:
+
+```text
+python3 deploy/apache-setup.py --apache-root /cygdrive/c/Apache24 --server-name roguetw.net
+```
+
+After reviewing the preview, add `--apply --restart`. The helper leaves TLS
+settings untouched, backs up changed files with a timestamp, and restores them
+if Apache's configuration test fails. It expects the existing HTTPS virtual
+host in `conf/extra/httpd-ssl.conf`. Use manual configuration for other layouts.
 
 MTC continues to use `/api`, including `/api/games.json`. Both extensionless
 and `.json` endpoints read SQLite; a stale `htdocs/api` export is not consulted.
