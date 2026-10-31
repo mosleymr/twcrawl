@@ -215,6 +215,39 @@ class StorageTests(unittest.TestCase):
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_activity_page_is_built_without_embedding_crawl_data(self):
+        from twcrawl.render import build_site
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            build_site(fixture(), output)
+            page = (output / "active.html").read_text()
+            self.assertIn('id="run-select"', page)
+            self.assertNotIn("Alice", page)
+            self.assertTrue((output / "assets" / "twcrawl-active.js").is_file())
+            self.assertTrue((output / "assets" / "twcrawl-active.css").is_file())
+
+    def test_activity_publisher_preserves_existing_site_and_backs_up_page(self):
+        root = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location("publish_active", root / "deploy" / "publish-active.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            checkout, public = base / "checkout", base / "htdocs"
+            web = checkout / "src" / "twcrawl" / "web"
+            web.mkdir(parents=True)
+            (public / "games").mkdir(parents=True)
+            for name in ("active.html", "twcrawl-active.css", "twcrawl-active.js"):
+                (web / name).write_text("new " + name)
+            (public / "games" / "style.css").write_text("existing style")
+            (public / "index.html").write_text("existing index")
+            (public / "active.html").write_text("previous page")
+            module.publish(checkout, public)
+            self.assertEqual((public / "active.html").read_text(), "new active.html")
+            self.assertEqual((public / "index.html").read_text(), "existing index")
+            self.assertEqual((public / "games" / "style.css").read_text(), "existing style")
+            self.assertEqual(next((checkout / "data" / "logs").glob("active-backup-*/active.html")).read_text(), "previous page")
+
     def test_proxy_is_added_only_to_the_named_virtual_host(self):
         path = Path(__file__).resolve().parents[1] / "deploy" / "apache-setup.py"
         spec = importlib.util.spec_from_file_location("apache_setup", path)

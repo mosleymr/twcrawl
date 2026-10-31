@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Activity | Gone Rogue Tradewars</title>
+  <link rel="stylesheet" href="/games/style.css">
+  <link rel="stylesheet" href="assets/twcrawl-active.css?v=1">
+  <script defer src="assets/twcrawl-active.js?v=1"></script>
+</head>
+<body class="activity-page">
+  <a class="skip-link" href="#main">Skip to report</a>
+  <div class="activity-shell">
+    <header class="page-header">
+      <div><p class="eyebrow">Server Activity</p><h1>Gone Rogue Tradewars</h1></div>
+      <a class="directory-link" href="/games/index.html">Game directory <span aria-hidden="true">&rarr;</span></a>
+    </header>
+    <div class="report-toolbar">
+      <label>Crawl <select id="run-select"><option value="latest">Latest completed crawl</option></select></label>
+      <button id="older-button" type="button" hidden>Earlier crawls</button>
+      <button id="refresh-button" type="button">Refresh</button>
+      <label class="auto-refresh"><input id="auto-refresh" type="checkbox" checked> Auto-refresh</label>
+      <a id="json-link" href="/api/reports/latest">JSON report</a>
+    </div>
+    <p id="load-status" class="load-status" role="status" aria-live="polite">Loading the latest stored crawl...</p>
+    <noscript><p class="notice">JavaScript is required. <a href="/api/reports/latest">Read the JSON report</a>.</p></noscript>
+    <main id="main" tabindex="-1" hidden>
+      <div class="snapshot-heading"><h2 id="snapshot-title">Latest Crawl</h2><p id="snapshot-time"></p></div>
+      <p id="comparison" class="comparison"></p>
+      <div id="metrics" class="metrics"></div>
+      <div class="view-tabs" role="tablist" aria-label="Activity views">
+        <button id="tab-report" role="tab" aria-selected="true" aria-controls="view-report" tabindex="0" data-view="report">Change Report</button>
+        <button id="tab-online" role="tab" aria-selected="false" aria-controls="view-online" tabindex="-1" data-view="online">Online Players</button>
+        <button id="tab-search" role="tab" aria-selected="false" aria-controls="view-search" tabindex="-1" data-view="search">Find Games</button>
+        <button id="tab-checks" role="tab" aria-selected="false" aria-controls="view-checks" tabindex="-1" data-view="checks">Server Checks</button>
+      </div>
+      <div id="activity-filter-wrap" class="filter-bar"><label for="activity-filter">Filter activity</label><input id="activity-filter" type="search" placeholder="Player, server or game" autocomplete="off"></div>
+      <div id="view-report" role="tabpanel" aria-labelledby="tab-report">
+        <section><div class="section-heading"><h2>Newly Seen Players</h2><span id="new-players-count"></span></div><div id="new-players"></div></section>
+        <section><div class="section-heading"><h2>Game Changes</h2><span id="game-changes-count"></span></div><p class="section-note">Newly observed games may include recovered crawl data, not just newly created games.</p><div id="game-changes"></div></section>
+        <section><div class="section-heading"><h2>Online Presence Changes</h2><span id="presence-count"></span></div><p class="section-note">Compared only where both server checks succeeded. Not seen in a sample does not establish an exact logout time.</p><div id="presence-changes"></div></section>
+      </div>
+      <div id="view-online" role="tabpanel" aria-labelledby="tab-online" hidden>
+        <section><div class="section-heading"><h2>Last Sampled Online</h2><span id="online-count"></span></div><p class="section-note">Sampled during the selected crawl, not live presence. Failed checks are unknown.</p><div id="online-groups"></div></section>
+      </div>
+      <div id="view-search" role="tabpanel" aria-labelledby="tab-search" hidden>
+        <section><div class="section-heading"><h2>Find Games</h2><span id="search-count" aria-live="polite"></span></div>
+          <form id="game-search" class="search-fields" role="search">
+            <label>Player name<input id="player-query" type="search" placeholder="e.g. Freejack" autocomplete="off"></label>
+            <label>Game or edit<input id="edit-query" type="search" placeholder="e.g. SubZero" autocomplete="off"></label>
+            <label>Server<select id="server-query"><option value="">All servers</option></select></label>
+            <label>Records<select id="record-query"><option value="all">All known games</option><option value="fresh">Successful checks</option><option value="retained">Failed / incomplete</option></select></label>
+            <button type="reset">Clear</button>
+          </form>
+          <p class="section-note">Player matches use high-score rosters. Online names are shown separately. Ages are as captured in the selected crawl.</p>
+          <div id="search-results"></div>
+        </section>
+      </div>
+      <div id="view-checks" role="tabpanel" aria-labelledby="tab-checks" hidden>
+        <section><div class="section-heading"><h2>Server Checks</h2><span id="checks-count"></span></div><p class="section-note">Failed servers retain last-known game data. Partial rosters and XML-only games are not complete player lists.</p><div id="server-checks"></div></section>
+      </div>
+    </main>
+    <footer><span>twcrawl activity archive</span><span id="checked-time"></span></footer>
+  </div>
+</body>
+</html>

@@ -128,6 +128,31 @@ consumer should display timestamps and retained failures alongside its results.
 
 ## Browser Example
 
+### Activity Page
+
+`https://roguetw.net/active.html` reads the stored API directly. It offers change
+reports, grouped online samples, game/edit/player search, server-check details,
+and historical run selection. The latest view checks for updates every five
+minutes while the tab is visible; archived views stay on the selected run.
+It never initiates a crawl. API failures retain the displayed snapshot with a
+warning, and old latest snapshots receive a stale-data warning.
+
+Source lives in `src/twcrawl/web/`. `twcrawl build` writes `public/active.html`
+and its two assets without embedding any crawl data. For the top-level Apache
+page, deploy from the checkout with:
+
+```text
+python3 deploy/publish-active.py --document-root /cygdrive/c/apache24/htdocs
+```
+
+The publisher copies only `active.html`, `assets/twcrawl-active.css`, and
+`assets/twcrawl-active.js`. Existing versions are backed up in `data/logs/`.
+It does not replace the server list, API files, homepage, or crawl database.
+The page uses the shared `/games/style.css` and its existing star background.
+The latest report's JSON link always identifies the displayed immutable run.
+
+### Fetching Games
+
 ```javascript
 const response = await fetch('/api/games?player=' + encodeURIComponent('Freejack'));
 if (!response.ok) throw new Error('Crawler data is unavailable');

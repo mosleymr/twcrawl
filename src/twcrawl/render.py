@@ -18,6 +18,7 @@ ASSET_DIR = ROOT / "assets"
 def build_site(data: dict, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     copy_assets(out_dir)
+    build_activity_page(out_dir)
     (out_dir / "style.css").write_text(STYLE, encoding="utf-8")
     (out_dir / "index.html").write_text(render_index(data), encoding="utf-8")
     for server in data.get("servers", []):
@@ -33,6 +34,15 @@ def build_site(data: dict, out_dir: Path) -> None:
             for game in games:
                 (out_dir / game_filename(server, game)).write_text(render_game(data, server, game), encoding="utf-8")
     write_static_api(data, out_dir)
+
+
+def build_activity_page(out_dir: Path) -> None:
+    source = Path(__file__).with_name("web")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "assets").mkdir(exist_ok=True)
+    for name in ("active.html", "twcrawl-active.css", "twcrawl-active.js"):
+        target = out_dir / name if name.endswith(".html") else out_dir / "assets" / name
+        shutil.copy2(source / name, target)
 
 
 def copy_assets(out_dir: Path) -> None:
