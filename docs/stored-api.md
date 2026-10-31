@@ -151,6 +151,13 @@ It does not replace the server list, API files, homepage, or crawl database.
 The page uses the shared `/games/style.css` and its existing star background.
 The latest report's JSON link always identifies the displayed immutable run.
 
+The activity page excludes `# Ship Destroyed #` entries from rosters, player
+search matches, and online listings. Online names are matched case-insensitively
+to the roster of that same server and game. Unknown ship types remain visible.
+Displayed online counts follow that filter; server-reported player totals and
+the stored API/history remain unchanged. Historical newly-seen-player records
+are still available in the change report.
+
 ### Fetching Games
 
 ```javascript

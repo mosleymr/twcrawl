@@ -14,6 +14,13 @@
   const gameURL = (id, letter) => `/games/server-${encodeURIComponent(id)}/game-${encodeURIComponent(lower(letter))}.html`;
   const key = (id, letter) => `${id}:${String(letter).toUpperCase()}`;
   const gameOf = row => state.games.find(g => key(g.server_id, g.letter) === key(row.server_id, row.letter));
+  const destroyedShip = player => /^#\s*ship\s+destroyed\s*#$/i.test(String(player?.ship_type || "").trim());
+  const roster = game => (game.high_scores || []).filter(player => !destroyedShip(player));
+  const visibleSession = session => {
+    if (destroyedShip(session)) return false;
+    const players = (gameOf(session)?.high_scores || []).filter(player => lower(player.name).trim() === lower(session.player).trim());
+    return !players.length || players.some(player => !destroyedShip(player));
+  };
   const age = game => game?.days_open == null ? "Unknown age" : `${number(game.days_open)} days`;
   const linkServer = row => `<a href="${serverURL(row.server_id)}">${escape(row.server_name)}</a>`;
   const linkGame = row => {
@@ -27,6 +34,7 @@
   const rowGame = row => `<td>${linkServer(row)}</td><td>${linkGame(row)}<small>${escape(age(gameOf(row)))}</small></td>`;
   const report = () => state.run.report || state.run.data.latest_report || {};
   const activity = () => report().activity || { online_sessions: [], server_checks: [] };
+  const onlineSessions = () => (activity().online_sessions || []).filter(visibleSession);
   const status = (message, error = false) => { $("load-status").textContent = message; $("load-status").dataset.error = String(error); };
   async function request(path) {
     const response = await fetch(`/api${path}`, { cache: "no-store", signal: AbortSignal.timeout(30000) });
@@ -37,13 +45,13 @@
     return (data.servers || []).flatMap(s => (s.games || []).map(g => ({ ...g, server_id: s.server_id, server_name: s.name, server_telnet: s.telnet, server_status: s.status, crawl_complete: s.crawl_complete })));
   }
   function renderHeader() {
-    const r = report(), a = activity(), summary = r.summary || {};
+    const r = report(), summary = r.summary || {};
     const failed = (r.failures || []).length;
     const partial = state.servers.filter(s => s.status === "online" && s.crawl_complete === false).length;
     $("snapshot-title").textContent = `${$("run-select").value === "latest" ? "Latest Crawl" : "Archived Crawl"} / Run ${state.run.id}`;
     $("snapshot-time").textContent = date(state.run.generated_at);
     $("comparison").textContent = r.previous_generated_at ? `Compared with ${date(r.previous_generated_at)}. ${partial} incomplete server${partial === 1 ? "" : "s"}; ${failed} failed check${failed === 1 ? "" : "s"}.` : "Baseline snapshot. Change comparisons start with subsequent crawls.";
-    const metrics = [[summary.online_servers ?? state.servers.filter(s => s.status === "online").length, `of ${state.servers.length} server records reached`, ""], [summary.game_count ?? state.games.length, "Distinct games known", ""], [a.session_count ?? 0, "Online sessions sampled", "positive"], [(r.new_players || []).length, "New player records", "positive"], [failed, "Failed server checks", failed ? "warning" : ""]];
+    const metrics = [[summary.online_servers ?? state.servers.filter(s => s.status === "online").length, `of ${state.servers.length} server records reached`, ""], [summary.game_count ?? state.games.length, "Distinct games known", ""], [onlineSessions().length, "Online sessions listed", "positive"], [(r.new_players || []).length, "New player records", "positive"], [failed, "Failed server checks", failed ? "warning" : ""]];
     $("metrics").innerHTML = metrics.map(([n, label, cls]) => `<div class="metric"><strong class="${cls}">${number(n)}</strong><span>${escape(label)}</span></div>`).join("");
     $("json-link").href = `/api/runs/${state.run.id}/report`;
     const selected = $("server-query").value;
@@ -58,12 +66,12 @@
     const changes = [["Newly observed", "new_games", "good"], ["Rebanged", "rebanged_games", "warn"], ["Removed", "removed_games", "bad"]].flatMap(([label, field, cls]) => (r[field] || []).map(row => ({ ...row, label, cls }))).filter(matches);
     $("game-changes-count").textContent = `${changes.length} changes`;
     $("game-changes").innerHTML = table(["Change", "Server", "Game / Age", "BigBang", "Previous BigBang"], changes.map(g => `<tr><td class="${g.cls}">${g.label}</td>${rowGame(g)}<td>${escape(g.bigbang || "Unknown")}</td><td>${escape(g.previous_bigbang || "\u2014")}</td></tr>`), "No matching new, removed or rebanged games.");
-    const presence = [["Newly sampled online", "newly_online", "good"], ["No longer sampled", "no_longer_online", "warn"]].flatMap(([label, field, cls]) => (r[field] || []).map(row => ({ ...row, label, cls }))).filter(matches);
+    const presence = [["Newly sampled online", "newly_online", "good"], ["No longer sampled", "no_longer_online", "warn"]].flatMap(([label, field, cls]) => (r[field] || []).map(row => ({ ...row, label, cls }))).filter(visibleSession).filter(matches);
     $("presence-count").textContent = `${presence.length} changes`;
     $("presence-changes").innerHTML = table(["Observation", "Player", "Server", "Game / Age", "Sample Time"], presence.map(p => `<tr><td class="${p.cls}">${p.label}</td><td>${escape(p.player)}</td>${rowGame(p)}<td>${escape(date(p.checked_at))}</td></tr>`), "No matching online presence changes.");
   }
   function renderOnline() {
-    const sessions = (activity().online_sessions || []).filter(matches);
+    const sessions = onlineSessions().filter(matches);
     $("online-count").textContent = `${sessions.length} sessions / ${new Set(sessions.map(s => lower(s.player))).size} players`;
     const servers = new Map();
     for (const session of sessions) {
@@ -84,14 +92,15 @@
       const label = s.status !== "online" ? "Failed" : partial ? "Incomplete" : "Reached";
       const check = s.online_check || {};
       const detail = s.error || (partial ? "Some game data or high scores are incomplete." : "");
-      return `<tr><td>${linkServer(s)}<small>${escape(s.telnet)}</small></td><td class="${s.status !== "online" ? "bad" : partial ? "warn" : "good"}">${label}</td><td class="num">${number(s.games?.length || 0)}</td><td class="${check.status === "ok" ? "good" : "warn"}">${check.status === "ok" ? `${check.players?.length || 0} sessions` : "Unknown"}</td><td>${escape(date(check.checked_at || s.last_crawled_at))}</td><td>${escape(detail || "\u2014")}</td></tr>`;
+      const sessions = (check.players || []).filter(p => visibleSession({ ...p, server_id: s.server_id }));
+      return `<tr><td>${linkServer(s)}<small>${escape(s.telnet)}</small></td><td class="${s.status !== "online" ? "bad" : partial ? "warn" : "good"}">${label}</td><td class="num">${number(s.games?.length || 0)}</td><td class="${check.status === "ok" ? "good" : "warn"}">${check.status === "ok" ? `${sessions.length} listed` : "Unknown"}</td><td>${escape(date(check.checked_at || s.last_crawled_at))}</td><td>${escape(detail || "\u2014")}</td></tr>`;
     }), "No matching server checks.");
   }
   const fresh = g => g.server_status === "online" && ["ok", "closed"].includes(g.status);
   function renderSearch() {
     const player = lower($("player-query").value.trim()), edit = lower($("edit-query").value.trim());
     const selected = $("server-query").value, records = $("record-query").value;
-    let games = state.games.filter(g => (!selected || String(g.server_id) === selected) && (!player || (g.high_scores || []).some(p => lower(p.name).includes(player))) && (!edit || lower(JSON.stringify([g.name, g.stats, g.raw_stats, g.xml])).includes(edit)) && (records === "all" || (records === "fresh" ? fresh(g) : !fresh(g))));
+    let games = state.games.filter(g => (!selected || String(g.server_id) === selected) && (!player || roster(g).some(p => lower(p.name).includes(player))) && (!edit || lower(JSON.stringify([g.name, g.stats, g.raw_stats, g.xml])).includes(edit)) && (records === "all" || (records === "fresh" ? fresh(g) : !fresh(g))));
     const sortValue = g => ({ server: `${g.server_name} ${g.letter}`, name: g.name || "", days: Number(g.days_open ?? -1), players: Number(g.players ?? -1), sectors: Number(g.sectors ?? -1), bigbang: Date.parse(g.bigbang || "") || 0, time: g.time || "" })[state.sort];
     games.sort((a, b) => {
       const x = sortValue(a), y = sortValue(b);
@@ -100,12 +109,12 @@
     $("search-count").textContent = `${games.length} game records`;
     const headings = [["server", "Server"], ["name", "Game"], ["bigbang", "BigBang"], ["days", "Days"], ["players", "Players"], [null, "Roster / Online"], ["sectors", "Sectors"], ["time", "Time Limit"], [null, "Data"]].map(([key, label]) => key ? `<button class="sort-column" type="button" data-sort="${key}" aria-sort="${state.sort === key ? (state.direction === 1 ? "ascending" : "descending") : "none"}">${label}</button>` : label);
     $("search-results").innerHTML = table(headings, games.map(g => {
-      const names = (g.high_scores || []).map(p => p.name).filter(Boolean);
+      const names = roster(g).map(p => p.name).filter(Boolean);
       const highlighted = player ? names.filter(n => lower(n).includes(player)) : names.slice(0, 4);
       const remainder = names.filter(n => !highlighted.includes(n));
-      const online = (activity().online_sessions || []).filter(p => key(p.server_id, p.letter) === key(g.server_id, g.letter)).map(p => p.player);
+      const online = onlineSessions().filter(p => key(p.server_id, p.letter) === key(g.server_id, g.letter)).map(p => p.player);
       const days = g.days_open;
-      return `<tr><td>${linkServer(g)}</td><td>${linkGame(g)}</td><td>${escape(g.bigbang || "Unknown")}</td><td class="num ${days == null ? "muted" : days < 60 ? "good" : days <= 120 ? "warn" : "bad"}">${number(days)}</td><td class="num">${number(g.players)}</td><td class="names">${highlighted.map(escape).join(", ") || "No captured roster"}${remainder.length ? `<details><summary>${remainder.length} more</summary>${remainder.map(escape).join(", ")}</details>` : ""}<small class="good">${online.length ? `Online: ${online.map(escape).join(", ")}` : ""}</small></td><td class="num">${number(g.sectors)}</td><td class="${lower(g.time) === "unlimited" ? "good" : "bad"}">${escape(g.time || "Unknown")}</td><td class="${fresh(g) ? "good" : "warn"}">${fresh(g) ? "Captured" : g.server_status !== "online" ? "Retained" : "Partial"}<small>${g.high_scores_error ? "High scores unavailable" : g.high_scores_checked_at ? "Roster checked" : "No roster check"}</small></td></tr>`;
+      return `<tr><td>${linkServer(g)}</td><td>${linkGame(g)}</td><td>${escape(g.bigbang || "Unknown")}</td><td class="num ${days == null ? "muted" : days < 60 ? "good" : days <= 120 ? "warn" : "bad"}">${number(days)}</td><td class="num">${number(g.players)}</td><td class="names">${highlighted.map(escape).join(", ") || (g.high_scores_checked_at ? "No eligible roster entries" : "No captured roster")}${remainder.length ? `<details><summary>${remainder.length} more</summary>${remainder.map(escape).join(", ")}</details>` : ""}<small class="good">${online.length ? `Online: ${online.map(escape).join(", ")}` : ""}</small></td><td class="num">${number(g.sectors)}</td><td class="${lower(g.time) === "unlimited" ? "good" : "bad"}">${escape(g.time || "Unknown")}</td><td class="${fresh(g) ? "good" : "warn"}">${fresh(g) ? "Captured" : g.server_status !== "online" ? "Retained" : "Partial"}<small>${g.high_scores_error ? "High scores unavailable" : g.high_scores_checked_at ? "Roster checked" : "No roster check"}</small></td></tr>`;
     }), "No games match these filters.");
   }
   function render() { renderHeader(); renderReport(); renderOnline(); renderChecks(); renderSearch(); }
