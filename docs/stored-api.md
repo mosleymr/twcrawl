@@ -135,6 +135,9 @@ observation (with one day of timezone tolerance). Old date corrections,
 backward changes, and impossible future dates are not rebangs. Different game
 epochs and failed roster captures do not generate newly-joined-player reports.
 The crawler's own username is excluded from online samples and presence deltas.
+Replayed older captures and unchanged sample timestamps do not create player
+or presence changes. An older server snapshot cannot establish game additions
+or removals.
 
 ### Repair Existing Reports
 

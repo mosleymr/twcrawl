@@ -33,6 +33,11 @@ def captured_at(server: dict, data: dict) -> datetime | None:
     return timestamp(server.get("last_success_at") or server.get("last_crawled_at") or data.get("generated_at"))
 
 
+def newer_sample(current: str | None, previous: str | None) -> bool:
+    after, before = timestamp(current), timestamp(previous)
+    return bool(after and before and after > before)
+
+
 def normalize_snapshot_dates(data: dict) -> dict:
     servers = []
     for server in data.get("servers", []):
@@ -154,9 +159,14 @@ def compare_crawls(previous: dict | None, current: dict) -> dict:
     previous = normalize_snapshot_dates(previous) if previous else {}
     current = normalize_snapshot_dates(current)
     old_games, new_games = game_map(previous), game_map(current)
+    previous_servers = {s.get("telnet", "").casefold(): s for s in previous.get("servers", [])}
     new, removed, rebanged, joined = [], [], [], []
     for key, (server, game) in new_games.items():
         if server.get("status") != "online":
+            continue
+        before = captured_at(previous_servers.get(key[0], {}), previous)
+        after = captured_at(server, current)
+        if before and after and after < before:
             continue
         old = old_games.get(key)
         if not old:
@@ -176,8 +186,8 @@ def compare_crawls(previous: dict | None, current: dict) -> dict:
                 rebanged.append({**identity(server, game), "previous_bigbang": old_game.get("bigbang")})
             # Different game epochs cannot establish newly joined players.
             continue
-        if (game.get("high_scores_error") or not game.get("high_scores_checked_at")
-                or game.get("high_scores_checked_at") == old_game.get("high_scores_checked_at")):
+        if (game.get("high_scores_error") or not newer_sample(
+                game.get("high_scores_checked_at"), old_game.get("high_scores_checked_at"))):
             continue
         # An unavailable previous roster is a baseline, not evidence of new joins.
         if "high_scores" not in old_game or old_game.get("high_scores_error"):
@@ -189,7 +199,9 @@ def compare_crawls(previous: dict | None, current: dict) -> dict:
     current_servers = {s.get("telnet", "").casefold(): s for s in current.get("servers", [])}
     for key in old_games.keys() - new_games.keys():
         server = current_servers.get(key[0], {})
-        if server.get("status") == "online" and server.get("crawl_complete"):
+        before, after = captured_at(old_games[key][0], previous), captured_at(server, current)
+        if (server.get("status") == "online" and server.get("crawl_complete")
+                and not (before and after and after <= before)):
             removed.append(identity(*old_games[key]))
 
     activity = stored_activity(current)
@@ -198,12 +210,11 @@ def compare_crawls(previous: dict | None, current: dict) -> dict:
                 for r in stored_activity(data)["online_sessions"]}
 
     before, after = presences(previous), presences(current)
-    previous_servers = {s.get("telnet", "").casefold(): s for s in previous.get("servers", [])}
     checked = {s.get("telnet", "").casefold() for s in current.get("servers", [])
                if (s.get("online_check") or {}).get("status") == "ok"
                and (previous_servers.get(s.get("telnet", "").casefold(), {}).get("online_check") or {}).get("status") == "ok"
-               and (s.get("online_check") or {}).get("checked_at") !=
-               (previous_servers[s.get("telnet", "").casefold()].get("online_check") or {}).get("checked_at")}
+               and newer_sample((s.get("online_check") or {}).get("checked_at"),
+                   (previous_servers[s.get("telnet", "").casefold()].get("online_check") or {}).get("checked_at"))}
     return {
         "generated_at": current.get("generated_at"), "previous_generated_at": previous.get("generated_at"),
         "baseline": not bool(previous.get("servers")), "comparison_version": 2,

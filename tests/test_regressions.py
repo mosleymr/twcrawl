@@ -32,6 +32,8 @@ def score(position, name):
 
 
 SCORES = "Trade Wars 2002 Trader Rankings\n--- ----- -- ----- -----\n" + score(1, "Alice") + "\n"
+FIRST_CAPTURE = "2026-10-01T00:00:00+00:00"
+SECOND_CAPTURE = "2026-10-01T00:01:00+00:00"
 
 
 class FakeSession:
@@ -69,8 +71,8 @@ def fixture():
         "server_id": "1", "name": "Test Server", "slug": "test", "telnet": "test:2002",
         "status": "online", "crawl_complete": True, "games": [{
             "letter": "A", "name": "SubZero", "bigbang": "10/01/2026", "status": "ok",
-            "high_scores_checked_at": "first", "high_scores": [{"name": "Alice"}], "stats": {"Latency": "100 ms"},
-        }], "online_check": {"status": "ok", "checked_at": "first", "players": [
+            "high_scores_checked_at": FIRST_CAPTURE, "high_scores": [{"name": "Alice"}], "stats": {"Latency": "100 ms"},
+        }], "online_check": {"status": "ok", "checked_at": FIRST_CAPTURE, "players": [
             {"letter": "A", "player": "Alice", "node": 1, "location": "Game A"},
         ]},
     }]}
@@ -140,8 +142,8 @@ class StorageTests(unittest.TestCase):
             current = copy.deepcopy(first)
             game = current["servers"][0]["games"][0]
             game["high_scores"].append({"name": "Bob"})
-            game["high_scores_checked_at"] = "second"
-            current["servers"][0]["online_check"] = {"status": "error", "checked_at": "second", "players": []}
+            game["high_scores_checked_at"] = SECOND_CAPTURE
+            current["servers"][0]["online_check"] = {"status": "error", "checked_at": SECOND_CAPTURE, "players": []}
             second = archive_data(current, db)
             self.assertEqual(second["latest_report"]["new_players"][0]["player"]["name"], "Bob")
             self.assertEqual(second["latest_report"]["no_longer_online"], [])
@@ -154,7 +156,7 @@ class StorageTests(unittest.TestCase):
         current = copy.deepcopy(old)
         current["generated_at"] = "2026-10-05T12:00:00+00:00"
         game = current["servers"][0]["games"][0]
-        game.update(bigbang="10/05/2026", high_scores=[{"name": "Bob"}], high_scores_checked_at="second")
+        game.update(bigbang="10/05/2026", high_scores=[{"name": "Bob"}], high_scores_checked_at=SECOND_CAPTURE)
         report = compare_crawls(old, current)
         self.assertEqual(len(report["rebanged_games"]), 1)
         self.assertEqual(report["new_players"], [])
@@ -174,7 +176,7 @@ class StorageTests(unittest.TestCase):
         current["generated_at"] = "2026-11-16T17:00:00+00:00"
         for value in ("10/02/2026", "09/30/2026", "10/01/2054"):
             game = current["servers"][0]["games"][0]
-            game.update(bigbang=value, high_scores_checked_at="second", high_scores=[{"name": "Bob"}])
+            game.update(bigbang=value, high_scores_checked_at=SECOND_CAPTURE, high_scores=[{"name": "Bob"}])
             report = compare_crawls(old, current)
             self.assertEqual(report["rebanged_games"], [])
             self.assertEqual(report["new_players"], [])
@@ -211,7 +213,7 @@ class StorageTests(unittest.TestCase):
         old = fixture()
         current = copy.deepcopy(old)
         game = current["servers"][0]["games"][0]
-        game.update(high_scores_checked_at="second", high_scores=[{"name": "  ALICE  "}])
+        game.update(high_scores_checked_at=SECOND_CAPTURE, high_scores=[{"name": "  ALICE  "}])
         self.assertEqual(compare_crawls(old, current)["new_players"], [])
         game.update(high_scores_error="incomplete", high_scores=[{"name": "Bob"}])
         self.assertEqual(compare_crawls(old, current)["new_players"], [])
@@ -220,7 +222,7 @@ class StorageTests(unittest.TestCase):
         old = fixture()
         current = copy.deepcopy(old)
         check = current["servers"][0]["online_check"]
-        check.update(checked_at="second", players=[{"player": " TWCrawl ", "letter": "A"},
+        check.update(checked_at=SECOND_CAPTURE, players=[{"player": " TWCrawl ", "letter": "A"},
                                                    {"player": "Alice", "letter": "A"}])
         report = compare_crawls(old, current)
         self.assertEqual(report["newly_online"], [])
@@ -228,7 +230,7 @@ class StorageTests(unittest.TestCase):
 
     def test_unknown_replacement_date_does_not_establish_new_player_joins(self):
         current = fixture()
-        current["servers"][0]["games"][0].update(bigbang="", high_scores_checked_at="second",
+        current["servers"][0]["games"][0].update(bigbang="", high_scores_checked_at=SECOND_CAPTURE,
                                                 high_scores=[{"name": "Bob"}])
         self.assertEqual(compare_crawls(fixture(), current)["new_players"], [])
 
@@ -296,11 +298,27 @@ class StorageTests(unittest.TestCase):
         old = fixture()
         current = copy.deepcopy(old)
         check = current["servers"][0]["online_check"]
-        check["checked_at"] = "second"
+        check["checked_at"] = SECOND_CAPTURE
         check["players"][0]["node"] = 10
         report = compare_crawls(old, current)
         self.assertEqual(report["newly_online"], [])
         self.assertEqual(report["no_longer_online"], [])
+
+    def test_replayed_older_crawl_does_not_generate_changes(self):
+        previous = fixture()
+        previous["generated_at"] = SECOND_CAPTURE
+        server = previous["servers"][0]
+        server["last_success_at"] = SECOND_CAPTURE
+        server["online_check"]["checked_at"] = SECOND_CAPTURE
+        server["games"][0]["high_scores_checked_at"] = SECOND_CAPTURE
+        server["games"].append({"letter": "B", "name": "Newer game", "bigbang": "10/01/2026"})
+        replay = fixture()
+        replay["servers"][0]["games"][0]["high_scores"] = [{"name": "Bob"}]
+        replay["servers"][0]["online_check"]["players"] = [{"letter": "A", "player": "Bob"}]
+        replay["servers"][0]["games"].append({"letter": "C", "name": "Older game", "bigbang": "09/01/2026"})
+        report = compare_crawls(previous, replay)
+        for field in ("new_games", "removed_games", "rebanged_games", "new_players", "newly_online", "no_longer_online"):
+            self.assertEqual(report[field], [], field)
 
     def test_http_reads_database_for_both_mtc_and_extensionless_routes(self):
         with tempfile.TemporaryDirectory() as directory:
