@@ -4,6 +4,7 @@ import importlib.util
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -256,7 +257,7 @@ class StorageTests(unittest.TestCase):
             game.update(bigbang="03/27/2054", stats={"Start Day": "03/27/54", "Game Age": "234 Days"},
                         raw_xml="original capture", raw_stats="original stats")
             # Simulate an archive written by the old parser.
-            with sqlite3.connect(db) as connection:
+            with closing(sqlite3.connect(db)) as connection, connection:
                 current.update(run_id=2, latest_report={"rebanged_games": [game]})
                 connection.execute("INSERT INTO runs VALUES (2, ?, ?, 'crawl', ?, ?)",
                     (current["generated_at"], current["generated_at"], json.dumps(current), json.dumps(current["latest_report"])))
