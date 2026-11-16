@@ -126,6 +126,38 @@ as new. Unavailable previous rosters establish a baseline. Offline or incomplete
 server checks do not count as game removals or online departures. Every API
 consumer should display timestamps and retained failures alongside its results.
 
+BigBang dates are compared as calendar dates, not display strings. TWGS's
+shifted two-digit years are translated using the captured game age and capture
+date, even when XML omits `LocalGameTime`. Retained/offline data uses its last
+successful capture, not today's date. A rebang requires a different, later
+BigBang date within the interval since that server's previous successful
+observation (with one day of timezone tolerance). Old date corrections,
+backward changes, and impossible future dates are not rebangs. Different game
+epochs and failed roster captures do not generate newly-joined-player reports.
+The crawler's own username is excluded from online samples and presence deltas.
+
+### Repair Existing Reports
+
+After updating an installation with bad derived dates, preview the repair:
+
+```text
+twcrawl repair-reports
+twcrawl repair-reports --apply
+```
+
+Use the same `--data` and `--database` paths as the crawl/API service. Do not run
+concurrently with a crawl; on Cygwin use the scheduled job's `flock` lock.
+The preview does not write the archive or JSON. `--apply` first backs up SQLite
+(including committed WAL data) and the current JSON under
+`data/logs/report-repair-*`, then recalculates derived BigBang dates and reports
+in one database transaction. Raw XML, raw stats, player records, run IDs, and
+run timestamps are preserved. The earliest archived snapshot becomes the
+comparison baseline because no earlier archived evidence is available. A newer
+local JSON edit is retained, not replaced by the archived snapshot. Repeating
+the repair is harmless. Rebuild the static site afterward if it is also served;
+the stored API reads corrected reports immediately. Restart the API process
+once after installing updated Python source, without restarting Apache/TWGS.
+
 ## Browser Example
 
 ### Activity Page

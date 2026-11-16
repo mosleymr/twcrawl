@@ -3,7 +3,7 @@ from __future__ import annotations
 import calendar
 import re
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 ANGLE_MENU_GAME_RE = re.compile(r"<([A-Z])>\s*([^<\n\r]*?)(?=<[A-Z#!]|\s+<[A-Z#!]|\n|$)")
@@ -280,7 +280,8 @@ def parse_game_stats(text: str, crawl_time: datetime) -> dict:
     local_game_year = game_year(values.get("Local Game Time"))
     result = {"raw_stats": block, "stats": values}
 
-    result["bigbang"] = normalize_game_date(values.get("Start Day"), local_game_year, crawl_time)
+    result["bigbang"] = normalize_game_date(values.get("Start Day"), local_game_year, crawl_time,
+                                            game_age=int_value(values.get("Game Age")))
     result["days_open"] = int_value(values.get("Game Age"))
     result["type"] = "Closed" if truthy(values.get("Closed Game")) else "Open"
     result["version"] = format_game_version(values)
@@ -382,7 +383,8 @@ def parse_xml_game(
         "xml": xml_game_sections(game_node),
         "raw_xml": ET.tostring(game_node, encoding="unicode"),
     }
-    result["bigbang"] = normalize_game_date(stats.get("Start Day"), local_game_year, crawl_time)
+    result["bigbang"] = normalize_game_date(stats.get("Start Day"), local_game_year, crawl_time,
+                                            game_age=int_value(stats.get("Game Age")))
     result["days_open"] = int_value(stats.get("Game Age"))
     result["type"] = "Closed" if truthy(stats.get("Closed Game")) else "Open"
     result["version"] = format_game_version(stats)
@@ -570,22 +572,43 @@ def int_value(value: str | None) -> int | None:
 def game_year(value: str | None) -> int | None:
     if not value:
         return None
-    match = re.search(r"\b\d{1,2}/\d{1,2}/(\d{2})\b", value)
+    match = re.search(r"\b\d{1,2}/\d{1,2}/(\d{4}|\d{2})\b", value)
     return int(match.group(1)) if match else None
 
 
-def normalize_game_date(value: str | None, local_game_year: int | None, crawl_time: datetime) -> str:
+def normalize_game_date(
+    value: str | None, local_game_year: int | None, crawl_time: datetime, *, game_age: int | None = None,
+) -> str:
     if not value:
         return ""
-    match = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{2})\b", value)
+    match = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})\b", value)
     if not match:
         return value
     month, day, yy = map(int, match.groups())
-    if local_game_year is None:
+    if not 1 <= month <= 12 or day < 1:
+        return ""
+    if len(match.group(3)) == 4:
+        year = yy
+    elif game_age is not None and game_age >= 0:
+        # Some XML games omit LocalGameTime. GameAge anchors the real year
+        # without confusing TWGS's shifted two-digit clock with 20xx.
+        try:
+            anchor = crawl_time.date() - timedelta(days=game_age)
+        except OverflowError:
+            return ""
+        candidates = []
+        for year in range(max(1, anchor.year - 1), min(9999, anchor.year + 1) + 1):
+            try:
+                candidates.append(datetime(year, month, day).date())
+            except ValueError:
+                pass
+        if not candidates:
+            return ""
+        return min(candidates, key=lambda date: abs((date - anchor).days)).strftime("%m/%d/%Y")
+    elif local_game_year is None:
         year = 2000 + yy
     else:
-        year = crawl_time.year + (yy - local_game_year)
-    if month < 1 or month > 12:
-        return value
-    day = min(day, calendar.monthrange(year, month)[1])
+        year = crawl_time.year + ((yy - local_game_year % 100 + 50) % 100 - 50)
+    if not 1 <= year <= 9999 or day > calendar.monthrange(year, month)[1]:
+        return ""
     return f"{month:02d}/{day:02d}/{year:04d}"

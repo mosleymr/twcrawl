@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
     build.add_argument("--out", type=Path, default=DEFAULT_PUBLIC)
 
+    repair = sub.add_parser("repair-reports", help="preview or repair stored dates and change reports without crawling")
+    repair.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    repair.add_argument("--apply", action="store_true", help="back up and repair the archive and derived JSON dates")
+
     serve_parser = sub.add_parser("serve", help="serve the SQLite-backed API and optional static pages")
     serve_parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     serve_parser.add_argument("--seeds", type=Path, default=DEFAULT_SEED)
@@ -125,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     monitor.add_argument("--no-save", action="store_true", help="do not update monitor state after reporting")
     monitor.add_argument("--json", action="store_true", help="write machine-readable JSON")
 
-    for command in (crawl, daily, add, serve_parser, archive, report):
+    for command in (crawl, daily, add, serve_parser, archive, report, repair):
         command.add_argument("--database", type=Path, help="SQLite archive path; defaults beside --data as twcrawl.sqlite3")
     args = parser.parse_args(argv)
     if hasattr(args, "database"):
@@ -217,6 +221,10 @@ def main(argv: list[str] | None = None) -> int:
         data = load_or_seed(args.data, args.seeds)
         build_site(data, args.out)
         print(f"built {args.out}")
+        return 0
+    if args.command == "repair-reports":
+        from .repair import repair_reports
+        print(json.dumps(repair_reports(args.database, args.data, apply=args.apply), indent=2))
         return 0
     if args.command == "serve":
         from .server import serve

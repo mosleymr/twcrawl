@@ -371,6 +371,7 @@ def crawl_server(
     server_info["last_bigbang"] = latest_bigbang(list(crawled_games.values()))
     server_info["last_crawled_at"] = crawl_time.isoformat()
     server_info["last_success_at"] = crawl_time.isoformat()
+    server_info["bot_name"] = bot_name
     server_info["crawl_transcript"] = menu[0:0]
     normalize_server_metadata(server_info)
     return server_info

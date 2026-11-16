@@ -4,13 +4,15 @@ import importlib.util
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from twcrawl import crawler
-from twcrawl.parser import parse_high_scores
+from twcrawl.parser import normalize_game_date, parse_game_stats, parse_high_scores, parse_twgs_xml
+from twcrawl.repair import repair_reports
 from twcrawl.server import make_server
 from twcrawl.storage import archive_data, compare_crawls, latest_run, read_runs
 from twcrawl.telnet import TelnetError, TelnetSession
@@ -149,11 +151,134 @@ class StorageTests(unittest.TestCase):
     def test_rebang_does_not_report_every_player_as_new(self):
         old = fixture()
         current = copy.deepcopy(old)
+        current["generated_at"] = "2026-10-05T12:00:00+00:00"
         game = current["servers"][0]["games"][0]
         game.update(bigbang="10/05/2026", high_scores=[{"name": "Bob"}], high_scores_checked_at="second")
         report = compare_crawls(old, current)
         self.assertEqual(len(report["rebanged_games"]), 1)
         self.assertEqual(report["new_players"], [])
+
+    def test_date_format_changes_and_unchanged_old_dates_are_not_rebangs(self):
+        old = fixture()
+        current = copy.deepcopy(old)
+        current["generated_at"] = "2026-11-16T17:00:00+00:00"
+        for value in ("10/01/2026", "2026-10-01", "10/1/26"):
+            current["servers"][0]["games"][0]["bigbang"] = value
+            self.assertEqual(compare_crawls(old, current)["rebanged_games"], [])
+
+    def test_old_corrected_backward_and_future_dates_are_not_rebangs(self):
+        old = fixture()
+        old["generated_at"] = "2026-11-15T17:00:00+00:00"
+        current = copy.deepcopy(old)
+        current["generated_at"] = "2026-11-16T17:00:00+00:00"
+        for value in ("10/02/2026", "09/30/2026", "10/01/2054"):
+            game = current["servers"][0]["games"][0]
+            game.update(bigbang=value, high_scores_checked_at="second", high_scores=[{"name": "Bob"}])
+            report = compare_crawls(old, current)
+            self.assertEqual(report["rebanged_games"], [])
+            self.assertEqual(report["new_players"], [])
+
+    def test_real_reset_after_an_offline_gap_and_timezone_boundary_is_reported(self):
+        old = fixture()
+        old["generated_at"] = "2026-11-16T00:00:00+00:00"
+        old["servers"][0].update(status="error", last_success_at="2026-10-01T12:00:00+00:00")
+        current = copy.deepcopy(old)
+        current["generated_at"] = "2026-11-17T00:05:00+00:00"
+        current["servers"][0].update(status="online", last_success_at=current["generated_at"])
+        for value in ("11/01/2026", "11/16/2026"):
+            current["servers"][0]["games"][0]["bigbang"] = value
+            self.assertEqual(len(compare_crawls(old, current)["rebanged_games"]), 1)
+
+    def test_shifted_year_records_are_compared_using_capture_date_and_age(self):
+        old = fixture()
+        old["generated_at"] = "2026-11-15T17:00:00+00:00"
+        game = old["servers"][0]["games"][0]
+        game.update(bigbang="03/27/2054", days_open=233, stats={"Start Day": "03/27/54", "Game Age": "233 Days"})
+        current = copy.deepcopy(old)
+        current["generated_at"] = "2026-11-16T17:00:00+00:00"
+        current["servers"][0]["games"][0].update(bigbang="03/27/2026", days_open=234,
+            stats={"Start Day": "03/27/54", "Game Age": "234 Days", "Local Game Time": "11/16/54 12:00 PM"})
+        self.assertEqual(compare_crawls(old, current)["rebanged_games"], [])
+        # An offline retained record must not advance its date with today's year.
+        current["servers"][0].update(status="error", last_success_at=current["generated_at"])
+        with tempfile.TemporaryDirectory() as directory:
+            current["generated_at"] = "2027-11-16T17:00:00+00:00"
+            saved = archive_data(current, Path(directory) / "test.sqlite3")
+            self.assertEqual(saved["servers"][0]["games"][0]["bigbang"], "03/27/2026")
+
+    def test_failed_roster_and_whitespace_are_not_new_players(self):
+        old = fixture()
+        current = copy.deepcopy(old)
+        game = current["servers"][0]["games"][0]
+        game.update(high_scores_checked_at="second", high_scores=[{"name": "  ALICE  "}])
+        self.assertEqual(compare_crawls(old, current)["new_players"], [])
+        game.update(high_scores_error="incomplete", high_scores=[{"name": "Bob"}])
+        self.assertEqual(compare_crawls(old, current)["new_players"], [])
+
+    def test_crawler_connections_are_excluded_from_activity_and_deltas(self):
+        old = fixture()
+        current = copy.deepcopy(old)
+        check = current["servers"][0]["online_check"]
+        check.update(checked_at="second", players=[{"player": " TWCrawl ", "letter": "A"},
+                                                   {"player": "Alice", "letter": "A"}])
+        report = compare_crawls(old, current)
+        self.assertEqual(report["newly_online"], [])
+        self.assertEqual(report["activity"]["session_count"], 1)
+
+    def test_unknown_replacement_date_does_not_establish_new_player_joins(self):
+        current = fixture()
+        current["servers"][0]["games"][0].update(bigbang="", high_scores_checked_at="second",
+                                                high_scores=[{"name": "Bob"}])
+        self.assertEqual(compare_crawls(fixture(), current)["new_players"], [])
+
+    def test_repair_preserves_newer_local_edits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db, data_path = root / "history.sqlite3", root / "crawl.json"
+            stored = archive_data(fixture(), db)
+            stored.update(generated_at="2026-11-17T12:00:00+00:00")
+            stored["servers"].append({"server_id": "local", "name": "Locally Added", "games": []})
+            data_path.write_text(json.dumps(stored))
+            repair_reports(db, data_path, apply=True)
+            saved = json.loads(data_path.read_text())
+            self.assertEqual(saved["servers"][1]["name"], "Locally Added")
+            self.assertEqual(saved["generated_at"], stored["generated_at"])
+
+    def test_repair_is_backed_up_idempotent_and_preserves_raw_captures(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db, data_path = root / "history.sqlite3", root / "crawl.json"
+            archive_data(fixture(), db)
+            current = fixture()
+            current["generated_at"] = "2026-11-16T17:00:00+00:00"
+            game = current["servers"][0]["games"][0]
+            game.update(bigbang="03/27/2054", stats={"Start Day": "03/27/54", "Game Age": "234 Days"},
+                        raw_xml="original capture", raw_stats="original stats")
+            # Simulate an archive written by the old parser.
+            with sqlite3.connect(db) as connection:
+                current.update(run_id=2, latest_report={"rebanged_games": [game]})
+                connection.execute("INSERT INTO runs VALUES (2, ?, ?, 'crawl', ?, ?)",
+                    (current["generated_at"], current["generated_at"], json.dumps(current), json.dumps(current["latest_report"])))
+            data_path.write_text(json.dumps(current))
+            before = db.read_bytes(), data_path.read_bytes()
+            preview = repair_reports(db, data_path)
+            self.assertFalse(preview["applied"])
+            self.assertEqual((db.read_bytes(), data_path.read_bytes()), before)
+            result = repair_reports(db, data_path, apply=True)
+            self.assertTrue(Path(result["backup"]).joinpath(db.name).exists())
+            self.assertEqual(len(read_runs(db)), 2)
+            saved = latest_run(db)["data"]
+            self.assertEqual(saved["run_id"], 2)
+            self.assertEqual(saved["servers"][0]["games"][0]["raw_xml"], "original capture")
+            self.assertEqual(saved["servers"][0]["games"][0]["raw_stats"], "original stats")
+            self.assertEqual(saved["servers"][0]["games"][0]["bigbang"], "03/27/2026")
+            self.assertEqual(saved["latest_report"]["rebanged_games"], [])
+            self.assertEqual(json.loads(data_path.read_text()), saved)
+            second = repair_reports(db, data_path, apply=True)
+            self.assertEqual(second["runs_changed"], 0)
+            self.assertIsNone(second["backup"])
+
 
     def test_failed_server_is_not_reported_as_game_removal(self):
         old = fixture()
@@ -212,6 +337,30 @@ class StorageTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join()
+
+
+class GameDateTests(unittest.TestCase):
+    def test_xml_with_and_without_local_clock_has_identical_real_date(self):
+        crawl = datetime(2026, 11, 16, 17, tzinfo=timezone.utc)
+        for clock in ("", "<Dynamic><LocalGameTime>11/16/54 12:00 PM</LocalGameTime></Dynamic>"):
+            xml = ("<TWGSData><Server><ServerLocalTime>11/16/2026 12:00 PM</ServerLocalTime></Server><Games>"
+                   "<Game><ID><GameSlot>B</GameSlot><GameName>Dragon Slayer</GameName></ID>"
+                   "<GeneralInfo><StartDay>03/27/54</StartDay><GameAge>234 Days</GameAge></GeneralInfo>"
+                   + clock + "</Game></Games></TWGSData>")
+            self.assertEqual(parse_twgs_xml(xml, crawl)["xml_games"][0]["bigbang"], "03/27/2026")
+
+    def test_age_anchor_rollover_and_invalid_dates(self):
+        crawl = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        self.assertEqual(normalize_game_date("12/31/53", None, crawl, game_age=1), "12/31/2025")
+        self.assertEqual(normalize_game_date("12/31/99", 0, crawl), "12/31/2025")
+        self.assertEqual(normalize_game_date("01/01/2026", None, crawl), "01/01/2026")
+        for value in ("13/01/26", "01/00/26", "02/30/26"):
+            self.assertEqual(normalize_game_date(value, None, crawl, game_age=1), "")
+
+    def test_star_stats_without_clock_use_same_age_anchor(self):
+        result = parse_game_stats("Game Stats:\nStart Day = 03/27/54\nGame Age = 234 Days\nEnd Stats.",
+                                  datetime(2026, 11, 16, tzinfo=timezone.utc))
+        self.assertEqual(result["bigbang"], "03/27/2026")
 
 
 class DeploymentTests(unittest.TestCase):
